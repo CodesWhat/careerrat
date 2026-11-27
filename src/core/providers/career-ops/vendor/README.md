@@ -231,3 +231,5 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
 - `peoplesoft.mjs`: detail descriptions go through `htmlToTextCapture` and
   `capDescriptionText` (64 KiB byte cap) instead of upstream's 4000-char slice,
   and `descriptionPartial` is propagated to the job when the cap trims one.
+- `peoplesoft.mjs`: a 404 or 410 on one `PostingSeq` moves on to the next
+  sequence instead of ending the detail loop.

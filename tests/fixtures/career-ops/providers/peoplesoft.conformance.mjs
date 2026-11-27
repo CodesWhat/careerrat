@@ -1514,6 +1514,32 @@ try {
       fail(
         `fetch() huge description = ${huge.jobs[0]?.description?.length} chars, partial=${huge.jobs[0]?.descriptionPartial}`
       );
+
+    // A 404 on PostingSeq=1 moves on to PostingSeq=2 instead of ending the loop.
+    const missing = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+    for (const status of [404, 410]) {
+      const fallthrough = await run((seq) => {
+        if (seq === "1") throw missing(status);
+        return new Response(detailWith("Seq two body text."), { status: 200 });
+      });
+      if (
+        fallthrough.seqs.join(",") === "1,2" &&
+        fallthrough.jobs[0]?.description === "Seq two body text."
+      )
+        pass(`fetch() tries PostingSeq=2 after PostingSeq=1 answers HTTP ${status}`);
+      else
+        fail(
+          `fetch() HTTP ${status} fallthrough: seqs=${fallthrough.seqs.join(",")} description=${JSON.stringify(fallthrough.jobs[0]?.description)}`
+        );
+    }
+
+    // Any other failure still keeps the listing row and stops at that seq.
+    const serverError = await run(() => {
+      throw missing(403);
+    });
+    if (serverError.seqs.join(",") === "1" && serverError.jobs[0]?.description === undefined)
+      pass("fetch() does not walk on past a non-404 detail failure");
+    else fail(`fetch() 403 detail: seqs=${serverError.seqs.join(",")}`);
   }
 } catch (e) {
   fail(`peoplesoft provider tests crashed: ${e.message}\n${e.stack}`);

@@ -733,7 +733,17 @@ export function parseJobDetail(html, expectedJobId) {
 async function fetchJobDetail(config, session, jobId) {
   for (const seq of [1, 2]) {
     const url = assertPeopleSoftUrl(buildDetailUrl(config, jobId, seq), config);
-    const html = await getWithSession(session.ctx, session.jar, config, url);
+    let html;
+    try {
+      html = await getWithSession(session.ctx, session.jar, config, url);
+    } catch (err) {
+      // CareerRat-local: a dead PostingSeq answers 404/410 on some tenants
+      // rather than redirecting. That is this sequence's answer, not the
+      // posting's, so try the next one. Anything else is a real failure.
+      const status = /** @type {any} */ (err)?.status;
+      if (status === 404 || status === 410) continue;
+      throw err;
+    }
     const detail = parseJobDetail(html, jobId);
     if (detail.valid) return detail;
     // Invalid page or id mismatch — try the next PostingSeq before giving up.
