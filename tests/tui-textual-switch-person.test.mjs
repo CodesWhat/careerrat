@@ -295,6 +295,21 @@ test("closing after a switch leaves a connection another session still shares", 
   assert.doesNotThrow(() => db.prepare("SELECT 1").get(), "the other session's handle stays open");
 });
 
+test("closing mid-switch releases the old root once, so a sharing session keeps its handle", async (t) => {
+  const { base, session } = await fixture(t);
+  t.after(() => closeAll());
+  const env = { ...process.env, CAREERRAT_HOME: base };
+  for (const key of ["CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"]) delete env[key];
+  const other = await createTextualSession({ repoRoot: root, env, agent: null, emit: () => {} });
+  const db = openDb({ repoRoot: root, env });
+  const switching = session.dispatch({ op: "switch-person", person: "ada" });
+  const closing = session.close();
+  await Promise.all([switching, closing]);
+  assert.doesNotThrow(() => db.prepare("SELECT 1").get(), "the other session's handle stays open");
+  await other.close();
+  assert.throws(() => db.prepare("SELECT 1").get(), /not open|closed/i);
+});
+
 test("a change written to the destination during teardown is in the handoff snapshot", async (t) => {
   const { base, events, session } = await fixture(t);
   const switching = session.dispatch({ op: "switch-person", person: "ada" });

@@ -53,7 +53,16 @@ export async function createTextualSession({
   let generation = 0;
   let switching = false;
   retainDb(ctx);
-  let releaseHolder = registerDbHolder(ctx, "tui");
+  // The root this session currently retains and its holder. Released once and
+  // cleared, so a close that lands mid-switch can't release the old root twice.
+  let held = { ctx, release: registerDbHolder(ctx, "tui") };
+  function releaseHeld() {
+    const current = held;
+    held = null;
+    if (!current) return;
+    current.release();
+    closeDb(current.ctx);
+  }
   let lastSnapshot = "";
   let framed = null;
 
@@ -216,7 +225,6 @@ export async function createTextualSession({
     watcher?.close();
     const oldPane = pane;
     const oldCtx = ctx;
-    const oldHolder = releaseHolder;
     pane = undefined;
     exited = false;
     framed = null;
@@ -231,18 +239,16 @@ export async function createTextualSession({
       teardownError = error;
     } finally {
       // Held until cleanup is done, then the cached connection goes with it.
-      closeDb(oldCtx);
-      oldHolder();
+      releaseHeld();
+      held = { ctx: nextCtx, release: nextHolder };
       switching = false;
     }
     if (closing) {
-      nextHolder();
-      closeDb(nextCtx);
+      releaseHeld();
       return;
     }
     env = nextEnv;
     ctx = nextCtx;
-    releaseHolder = nextHolder;
     // The watcher's baseline comes before the final read, so a write during
     // teardown is either in this read or reported by the watcher. If the fresh
     // read can't be used, the preflight one stands.
@@ -545,8 +551,7 @@ export async function createTextualSession({
         try {
           await stopTerminalSessionSearches({ ...ctx, sessionId });
         } finally {
-          releaseHolder();
-          closeDb(ctx);
+          releaseHeld();
         }
       }
     })();
