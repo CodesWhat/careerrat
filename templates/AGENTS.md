@@ -2,30 +2,12 @@
 
 Read this before touching jobs.
 
-## Dashboard Dev Server
+## Terminal Workspace
 
-The dashboard should be live during active CareerRat work. Check
-`http://localhost:7777`; if it is down, start `careerrat tracker-dev` from the repo
-root before telling the user to use the dashboard.
-
-`careerrat start` opens the terminal workspace and does not serve the dashboard.
-`careerrat start --browser` starts the legacy dashboard as a
-separate local process and records `.internal/tracker-dev.pid` plus
-`.internal/tracker-dev.log`. Agents opened directly in the repo must perform the
-same check themselves.
-
-For agent-run sessions, detach it so it survives the current turn:
-
-```bash
-mkdir -p .internal
-nohup careerrat tracker-dev > .internal/tracker-dev.log 2>&1 &
-echo $! > .internal/tracker-dev.pid
-```
-
-If port 7777 is already occupied by something other than CareerRat, use
-`careerrat tracker-dev --port 7778` and report the actual URL. Keep the server
-running after tracker-visible changes so the page hot reloads. The dashboard is
-read-only; agents and skills write `workspace/tracker.json`.
+`careerrat start` opens the terminal workspace. The browser dashboard is retired:
+`careerrat tracker-dev` and `careerrat start --browser` print a retired message
+and exit 1, so don't start a local server or point the user at one. Agents and
+skills write `workspace/tracker.json` and the terminal workspace reads it.
 
 ## Actionability Write-Back
 

@@ -137,7 +137,7 @@ careerrat start
 ```
 
 `careerrat start` opens the CareerRat workspace in your terminal. The Mac app
-and the browser workspace are being retired.
+and the browser workspace are retired.
 
 The Mac app ended at v0.19.2 and is no longer updated. The `.dmg` and the
 Homebrew cask are frozen at that version, so install from npm.
@@ -519,8 +519,9 @@ careerrat start
 
 `careerrat start` and `careerrat tui` are the same command: they open the
 terminal workspace. `careerrat start claude` or `careerrat start codex` picks the
-agent, and `--no-agent` skips it. `careerrat start --browser` still serves the
-legacy browser workspace (with `--no-open` and `--port`) until it is removed.
+agent, and `--no-agent` skips it. The browser workspace was retired in v0.26:
+`careerrat start --browser` and `careerrat tracker-dev` print a retired message
+and exit 1.
 
 Useful terminal commands:
 
@@ -529,7 +530,6 @@ careerrat next          # show the next useful agent-led workflow
 careerrat doctor        # verify setup, data, skills, and runtime health
 careerrat update        # update an npm installation without touching user data
 careerrat tracker       # write a recovery snapshot and summary
-careerrat tracker-dev   # legacy: serve the browser workspace at localhost:7777
 ```
 
 ### Textual workspace

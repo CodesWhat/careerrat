@@ -16,6 +16,8 @@ All notable changes to CareerRat are documented here. This project follows
 - CI: every ci-verify and security-actions job now has a timeout, so a job that hangs in a harden-runner or post-step fails in minutes instead of running to the 6-hour default.
 - The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.
 - CI: the main-only `web-build`, `windows-package-smoke` and `browser-application-prep` jobs no longer build the web app, the Windows installer or the visual-contract app. `web-build` runs the packed npm install smoke, `windows-package-smoke` runs the `[win32]` tests plus that smoke on Windows, and `browser-application-prep` runs only the live application-preparation tests. The job names stay because the main ruleset requires them.
+- The browser entry points are retired. `careerrat tracker-dev`, `careerrat start --browser`, `--port` and `--no-open` print a retired message and exit 1 (`start --no-dashboard` still works). The npm package no longer ships `apps/web/dist`, and the `serve`, `tracker:dev`, `app:dev`, `app:build` and `prepack` scripts are gone. `careerrat update` no longer restarts a running browser workspace. If `.internal/tracker-dev.pid` points at a live tracker-dev process, it prints the pid and the `kill` command and leaves the process alone.
+- CI: the `web-build` job now fails if `npm pack --dry-run` lists any `apps/web` path.
 
 ### Fixed
 

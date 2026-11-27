@@ -125,8 +125,6 @@ jobs:
           echo "Release gate passed for $release_tag."
       - name: Install locked dependencies
         run: corepack npm ci
-      - name: Build the release web assets
-        run: corepack npm run app:build
       - name: Check private release privacy boundaries
         env:
           CAREERRAT_PERSONAL_SENTINELS: ${{ secrets.CAREERRAT_PERSONAL_SENTINELS }}

@@ -272,46 +272,17 @@ what was saved and the affected record. For DB captures, mark the intake item do
 through `careerrat data intake update` only after its owning write is verified;
 keep blocked items at needs_you with their reason and artifact references.
 
-Legacy workspaces retain their skill flow without an implicit DB migration. The server instructions below apply to the
-existing browser entry while its retirement is in progress.
+Legacy workspaces retain their skill flow without an implicit DB migration.
 
-The dashboard is part of the live CareerRat workspace, not a one-off artifact. In
-any active job-search session, make sure `careerrat tracker-dev` is serving the
-tracker before telling the user to open the dashboard.
+The browser workspace is retired. `careerrat tracker-dev` and `careerrat start
+--browser` now print a retired message and exit 1, so never start or point the
+user at a local server or `http://localhost:7777`. `careerrat start` opens the
+terminal workspace. After changing tracker-visible data, run `careerrat tracker`
+when a recovery snapshot and summary are needed.
 
-- `careerrat start` opens the terminal workspace and does not serve the browser
-  app. The legacy browser app starts with `careerrat start --browser` (or
-  `careerrat tracker-dev`), which records `.internal/tracker-dev.pid` plus
-  `.internal/tracker-dev.log`. Agents opened directly in the repo must perform
-  the same check themselves.
-- Check `http://localhost:7777` first. If it is down, start the server from the
-  repo root.
-- For agent-run sessions, start it detached so it survives the current terminal
-  turn:
-
-  ```bash
-  mkdir -p .internal
-  nohup careerrat tracker-dev > .internal/tracker-dev.log 2>&1 &
-  echo $! > .internal/tracker-dev.pid
-  ```
-
-- If port 7777 is in use, verify whether it is already CareerRat. If it is not,
-  start with another port, for example `careerrat tracker-dev --port 7778`, and
-  tell the user the actual URL.
-- After changing tracker-visible data, keep the app server running so the open
-  React shell receives the update. Run `careerrat tracker` when a recovery
-  snapshot and summary are needed; it no longer publishes a second dashboard.
-- **Live data updates are event-driven, not a poll.** `careerrat tracker-dev`
-  watches `workspace/tracker.json` and `workspace/activity.jsonl` with
-  `fs.watch`, then pushes typed `tracker-update` or `activity-update`
-  Server-Sent Events. The React shell reloads canonical data from those events;
-  the server does not run a child renderer or rebuild HTML.
-- **There is one dashboard.** The old static tracker page is retired. For every
-  live session, point the user at `careerrat tracker-dev`
-  (`http://localhost:7777`).
-- The app writes supported local actions through the canonical domain layer.
-  Agents and skills own longer or tool-heavy workflows. No surface hand-edits
-  generated `workspace/tracker.json` in a database-backed workspace.
+The workspace writes supported local actions through the canonical domain layer.
+Agents and skills own longer or tool-heavy workflows. No surface hand-edits
+generated `workspace/tracker.json` in a database-backed workspace.
 
 ## Actionability Write-Back Contract
 
