@@ -4,14 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { prepareQuickStartSourcing } from "../src/cli/onboard-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import {
   candidateArtifactPut,
+  candidateConfigGet,
   candidateConfigPatch,
   candidateSetupInitialize,
   sourceConfigGet,
 } from "../src/core/db/verbs.mjs";
+import { prepareDeterministicSearchSources } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -53,11 +54,13 @@ test("discovery quick-start prepares only canonical DB source config", () => {
     data: { path: "candidate/SOURCE_RESUME.md" },
   });
 
-  const result = prepareQuickStartSourcing({ repoRoot, env });
+  const result = prepareDeterministicSearchSources({
+    repoRoot,
+    env,
+    config: candidateConfigGet({ repoRoot, env }),
+  });
 
-  assert.equal(result.status, 200);
-  assert.equal(result.body.ok, true);
-  assert.equal(result.body.written, undefined);
+  assert.equal(result.searchSources.searches.length > 0, true);
   const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" });
   assert.equal(sourceConfig.stored, true);
   assert.equal(sourceConfig.data.searches.length > 0, true);
@@ -80,11 +83,14 @@ test("discovery quick-start does not generate sources without target titles", ()
 
   candidateSetupInitialize({ repoRoot, env });
 
-  const result = prepareQuickStartSourcing({ repoRoot, env });
+  const result = prepareDeterministicSearchSources({
+    repoRoot,
+    env,
+    config: candidateConfigGet({ repoRoot, env }),
+  });
   const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" });
 
-  assert.equal(result.status, 200);
-  assert.equal(result.body.searches.count, 0);
+  assert.equal(result.searchSources?.searches?.length ?? 0, 0);
   assert.equal(sourceConfig.stored, false);
   assert.deepEqual(sourceConfig.data.searches, []);
 });

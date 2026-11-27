@@ -5,12 +5,9 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Readable } from "node:stream";
 import { after, test } from "node:test";
-import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import {
   normalizeAshbyForm,
   normalizeGreenhouseQuestions,
@@ -20,7 +17,7 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
-import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
+import { buildPacketContext } from "../src/core/packet/context.mjs";
 
 const cleanupRoots = [];
 
@@ -76,81 +73,6 @@ function readApp(repoRoot, id) {
   const db = openDb({ repoRoot, env: {} });
   const row = db.prepare("SELECT data FROM applications WHERE id = ?").get(id);
   return row ? JSON.parse(row.data) : null;
-}
-
-function bootServer(repoRoot, opts = {}) {
-  const routes = new Map();
-  function addRoute(method, path, handler) {
-    routes.set(`${method} ${path}`, handler);
-  }
-  mountPacketRoutes({ addRoute, repoRoot, env: {}, ...opts });
-
-  const server = createServer((req, res) => {
-    const url = (req.url || "/").split("?")[0];
-    const route = routes.get(`${req.method} ${url}`);
-    if (!route) {
-      res.writeHead(404).end();
-      return;
-    }
-    dispatchHttpRoute(route, req, res);
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
-}
-
-function mountDirectRoutes(repoRoot, opts = {}) {
-  const routes = new Map();
-  mountPacketRoutes({
-    addRoute(method, path, handler) {
-      routes.set(`${method} ${path}`, handler);
-    },
-    repoRoot,
-    env: {},
-    ...opts,
-  });
-  return routes;
-}
-
-async function postJsonDirect(routes, path, payload) {
-  const handler = routes.get(`POST ${path}`);
-  assert.ok(handler, `expected mounted route for POST ${path}`);
-  const req = Readable.from([Buffer.from(JSON.stringify(payload ?? {}))]);
-  req.method = "POST";
-  req.url = path;
-  req.headers = { "content-type": "application/json" };
-  let status = 200;
-  let responseBody = "";
-  const res = {
-    writeHead(nextStatus) {
-      status = nextStatus;
-      return this;
-    },
-    end(chunk = "") {
-      responseBody += String(chunk);
-    },
-  };
-  await handler(req, res);
-  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
-}
-
-function baseUrl(server) {
-  const { port } = server.address();
-  return `http://127.0.0.1:${port}`;
-}
-
-function closeServer(server) {
-  return new Promise((resolve) => server.close(resolve));
-}
-
-async function postJson(server, path, payload) {
-  const res = await fetch(`${baseUrl(server)}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  return { status: res.status, body };
 }
 
 async function loadQuestionsModule() {
@@ -851,71 +773,43 @@ test("a salary disclosure question with no expected_base on file degrades to NEE
   assert.doesNotMatch(answer.answer, /150,000/);
 });
 
-test("POST /api/packet/questions persists capture before local answer drafting", async () => {
+test("capturePacketQuestions persists capture before local answer drafting", async () => {
   const repoRoot = tempRepo();
   seedApp(repoRoot);
-  const server = await bootServer(repoRoot);
-  try {
-    const questionResult = await postJson(server, "/api/packet/questions", {
-      appId: "app-packet",
-      source: "paste",
-      manualText: [
-        "1. Why Acme AI?",
-        "2. Voluntary Self-Identification of Disability",
-        "3. What recent tools have you used?",
-      ].join("\n"),
-    });
-    assert.equal(questionResult.status, 200);
-    assert.equal(questionResult.body.ok, true);
-    assert.equal(questionResult.body.data?.questions?.length, 2);
-    assert.equal(questionResult.body.data?.excluded?.length, 1);
+  const { capturePacketQuestions } = await loadQuestionsModule();
+  const data = await capturePacketQuestions({
+    repoRoot,
+    env: {},
+    appId: "app-packet",
+    source: "paste",
+    manualText: [
+      "1. Why Acme AI?",
+      "2. Voluntary Self-Identification of Disability",
+      "3. What recent tools have you used?",
+    ].join("\n"),
+  });
+  assert.equal(data?.questions?.length, 2);
+  assert.equal(data?.excluded?.length, 1);
 
-    const app = readApp(repoRoot, "app-packet");
-    const artifacts = app?.artifacts || {};
-    assert.match(String(artifacts.packetQuestionsSource || ""), /^workspace\/jobs\/.+\.json$/);
-    assert.equal(artifacts.packetQuestionCount, 2);
-    assert.equal(artifacts.packetQuestionExcludedCount, 1);
-    assert.equal(app?.packetManifest?.questions?.answerableCount, 2);
-    assert.ok(existsSync(join(repoRoot, artifacts.packetQuestionsSource)));
-  } finally {
-    await closeServer(server);
-  }
+  const app = readApp(repoRoot, "app-packet");
+  const artifacts = app?.artifacts || {};
+  assert.match(String(artifacts.packetQuestionsSource || ""), /^workspace\/jobs\/.+\.json$/);
+  assert.equal(artifacts.packetQuestionCount, 2);
+  assert.equal(artifacts.packetQuestionExcludedCount, 1);
+  assert.equal(app?.packetManifest?.questions?.answerableCount, 2);
+  assert.ok(existsSync(join(repoRoot, artifacts.packetQuestionsSource)));
 });
 
-test("POST /api/packet/answers drafts only persisted non-EEO questions through local bounded AI", async () => {
+test("draftPacketAnswers drafts only persisted non-EEO questions through local bounded AI", async () => {
   const repoRoot = tempRepo();
   seedApp(repoRoot);
   const seen = [];
-  const server = await bootServer(repoRoot, {
-    packetAnswersCall: async (options) => {
-      seen.push(JSON.stringify(options));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              answers: [
-                {
-                  questionId: "q1",
-                  answer: "Acme AI maps to my confirmed production AI workflow experience.",
-                  evidenceIds: ["ev-ai-001"],
-                },
-                {
-                  questionId: "q3",
-                  answer: "NEEDS YOU: confirm which recent tools are fair to claim.",
-                  evidenceIds: [],
-                  gap: "unsupported-tool-claim",
-                },
-              ],
-            }),
-          },
-        ],
-        model: "claude-test",
-      };
-    },
-  });
-  try {
-    await postJson(server, "/api/packet/questions", {
+  const { capturePacketQuestions } = await loadQuestionsModule();
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const answerData = await (async () => {
+    await capturePacketQuestions({
+      repoRoot,
+      env: {},
       appId: "app-packet",
       source: "paste",
       manualText: [
@@ -924,29 +818,53 @@ test("POST /api/packet/answers drafts only persisted non-EEO questions through l
         "3. What recent tools have you used?",
       ].join("\n"),
     });
-    const answerResult = await postJson(server, "/api/packet/answers", {
+    return draftPacketAnswers({
+      repoRoot,
+      env: {},
       appId: "app-packet",
       context: PACKET_CONTEXT,
+      call: async (options) => {
+        seen.push(JSON.stringify(options));
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                answers: [
+                  {
+                    questionId: "q1",
+                    answer: "Acme AI maps to my confirmed production AI workflow experience.",
+                    evidenceIds: ["ev-ai-001"],
+                  },
+                  {
+                    questionId: "q3",
+                    answer: "NEEDS YOU: confirm which recent tools are fair to claim.",
+                    evidenceIds: [],
+                    gap: "unsupported-tool-claim",
+                  },
+                ],
+              }),
+            },
+          ],
+          model: "claude-test",
+        };
+      },
     });
-    assert.equal(answerResult.status, 200);
-    assert.equal(answerResult.body.ok, true);
-    assert.deepEqual(
-      answerResult.body.data?.answers?.map((a) => a.questionId),
-      ["q1", "q3"]
-    );
-    assert.deepEqual(answerResult.body.data?.excludedQuestionIds, ["q2"]);
-    assert.equal(answerResult.body.data?.answers?.[1]?.uploadReady, false);
-    assert.equal(seen.length, 1);
-    assert.doesNotMatch(
-      JSON.stringify(answerResult.body),
-      /\/api\/skill\/run|answer-question|Voluntary Self-Identification|PRIVATE_CURRENT_BASE_SENTINEL/
-    );
-  } finally {
-    await closeServer(server);
-  }
+  })();
+  assert.deepEqual(
+    answerData.answers.map((a) => a.questionId),
+    ["q1", "q3"]
+  );
+  assert.deepEqual(answerData.excludedQuestionIds, ["q2"]);
+  assert.equal(answerData.answers[1].uploadReady, false);
+  assert.equal(seen.length, 1);
+  assert.doesNotMatch(
+    JSON.stringify(answerData),
+    /\/api\/skill\/run|answer-question|Voluntary Self-Identification|PRIVATE_CURRENT_BASE_SENTINEL/
+  );
 });
 
-test("POST /api/packet/answers builds real DB context when only applicationId is supplied", async () => {
+test("draftPacketAnswers with buildPacketContext uses real DB context for an applicationId", async () => {
   const repoRoot = tempRepo();
   seedApp(repoRoot);
   candidateConfigPatch({
@@ -965,41 +883,45 @@ test("POST /api/packet/answers builds real DB context when only applicationId is
     ],
   });
   const seen = [];
-  const routes = mountDirectRoutes(repoRoot, {
-    packetAnswersCall: async (options) => {
-      seen.push(JSON.stringify(options));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              answers: [
-                {
-                  questionId: "q1",
-                  answer: "My confirmed evidence covers customer-facing agentic workflows.",
-                  evidenceIds: ["ev-route-context"],
-                },
-              ],
-            }),
-          },
-        ],
-        model: "claude-test",
-      };
-    },
-  });
-  await postJsonDirect(routes, "/api/packet/questions", {
+  const { capturePacketQuestions } = await loadQuestionsModule();
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const call = async (options) => {
+    seen.push(JSON.stringify(options));
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            answers: [
+              {
+                questionId: "q1",
+                answer: "My confirmed evidence covers customer-facing agentic workflows.",
+                evidenceIds: ["ev-route-context"],
+              },
+            ],
+          }),
+        },
+      ],
+      model: "claude-test",
+    };
+  };
+  await capturePacketQuestions({
+    repoRoot,
+    env: {},
     appId: "app-packet",
     source: "paste",
     manualText: "1. Why Acme AI?",
   });
 
-  const answerResult = await postJsonDirect(routes, "/api/packet/answers", {
+  const data = await draftPacketAnswers({
+    repoRoot,
+    env: {},
     applicationId: "app-packet",
+    context: buildPacketContext({ repoRoot, env: {}, applicationId: "app-packet" }),
+    call,
   });
 
-  assert.equal(answerResult.status, 200);
-  assert.equal(answerResult.body.ok, true);
-  assert.equal(answerResult.body.data.answers[0].uploadReady, true);
+  assert.equal(data.answers[0].uploadReady, true);
   assert.equal(seen.length, 1);
   assert.match(seen[0], /Route Context Candidate/);
   assert.match(seen[0], /ev-route-context/);
@@ -1084,40 +1006,42 @@ test("forced answer regeneration preserves three prior application answers and g
     }
   );
   const seenQuestionIds = [];
-  const routes = mountDirectRoutes(repoRoot, {
-    packetAnswersCall: async (options) => {
-      const prompt = options.messages.at(-1).content;
-      const questions = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
-      seenQuestionIds.push(...questions.map(({ id }) => id));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              answers: [
-                {
-                  questionId: "q-travel",
-                  answer: "NEEDS YOU: choose Yes or No based on your availability.",
-                  evidenceIds: [],
-                  gap: "personal travel availability",
-                },
-              ],
-            }),
-          },
-        ],
-        model: "claude-test",
-      };
-    },
-  });
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const call = async (options) => {
+    const prompt = options.messages.at(-1).content;
+    const questions = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
+    seenQuestionIds.push(...questions.map(({ id }) => id));
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            answers: [
+              {
+                questionId: "q-travel",
+                answer: "NEEDS YOU: choose Yes or No based on your availability.",
+                evidenceIds: [],
+                gap: "personal travel availability",
+              },
+            ],
+          }),
+        },
+      ],
+      model: "claude-test",
+    };
+  };
 
-  const result = await postJsonDirect(routes, "/api/packet/answers", {
+  const result = await draftPacketAnswers({
+    repoRoot,
+    env: {},
     applicationId: "app-packet",
+    context: buildPacketContext({ repoRoot, env: {}, applicationId: "app-packet" }),
+    call,
   });
 
-  assert.equal(result.status, 200);
   assert.deepEqual(seenQuestionIds, ["q-travel"]);
   assert.deepEqual(
-    result.body.data.answers.slice(0, 3).map(({ questionId, answer }) => ({ questionId, answer })),
+    result.answers.slice(0, 3).map(({ questionId, answer }) => ({ questionId, answer })),
     [
       { questionId: "q-linkedin", answer: "https://www.linkedin.com/in/alexrivera" },
       {
@@ -1128,13 +1052,13 @@ test("forced answer regeneration preserves three prior application answers and g
     ]
   );
   assert.deepEqual(
-    result.body.data.answers
+    result.answers
       .filter((answer) => answer.uploadReady === false)
       .map((answer) => answer.questionId),
     ["q-travel"]
   );
-  assert.equal(result.body.data.uploadReady, false);
-  assert.equal(result.body.data.manual.required, true);
+  assert.equal(result.uploadReady, false);
+  assert.equal(result.manual.required, true);
 });
 
 test("tool presence alone cannot produce an upload-ready years, clearance or location answer", async () => {

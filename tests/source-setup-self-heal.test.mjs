@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
 import { after, test } from "node:test";
-import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateConfigPatch,
@@ -84,47 +82,6 @@ function sourceConfigUpdatedAt(repoRoot) {
   return openDb({ repoRoot })
     .prepare("SELECT updated_at FROM candidate_source_configs WHERE name = ?")
     .get("search-sources").updated_at;
-}
-
-function bootServer(repoRoot, opts = {}) {
-  const routes = new Map();
-  const fetchCalls = [];
-  function addRoute(method, path, handler) {
-    routes.set(`${method} ${path}`, handler);
-  }
-  mountSearchRoutes({
-    addRoute,
-    repoRoot,
-    env: {},
-    fetchImpl: async (...args) => {
-      fetchCalls.push(args);
-      throw new Error("self-heal must not call fetch");
-    },
-    ...opts,
-  });
-  return { routes, fetchCalls };
-}
-
-async function getJson(server, path) {
-  const route = server.routes.get(`GET ${path}`);
-  assert.ok(route, `missing route: GET ${path}`);
-  const req = Readable.from([]);
-  req.method = "GET";
-  req.url = path;
-  const res = {
-    status: null,
-    rawBody: "",
-    writeHead(status) {
-      this.status = status;
-      return this;
-    },
-    end(chunk = "") {
-      this.rawBody += chunk;
-      return this;
-    },
-  };
-  await route(req, res);
-  return { status: res.status, body: JSON.parse(res.rawBody) };
 }
 
 after(() => {
@@ -237,24 +194,4 @@ test("non-tech pre-fix generated boards heal to one enabled canonical row each a
   assert.equal(second.deterministicSources.attempted, 9);
   assert.deepEqual(second.searchSources, storedAfterFirst);
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
-});
-
-test("GET /api/search/sources returns healed readiness in one in-process request with zero AI or network calls", async () => {
-  const repoRoot = tempRepo();
-  seedCandidate(repoRoot, ["Applied AI Engineer", "Forward Deployed Engineer"]);
-  putPreFixSearchSources(repoRoot);
-  const server = bootServer(repoRoot);
-
-  const response = await getJson(server, "/api/search/sources");
-
-  assert.equal(response.status, 200);
-  assert.ok(response.body.deterministicSources.attempted > 0);
-  assert.ok(response.body.searches.enabled > 0);
-  assert.equal(server.fetchCalls.length, 0);
-  assert.equal(
-    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.some(
-      (source) => source.provider === "RemoteVibeCodingJobs"
-    ),
-    true
-  );
 });

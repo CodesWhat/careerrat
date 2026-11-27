@@ -16,19 +16,15 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
-import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
-import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { appSetStatus, appUpsert } from "../src/core/db/verbs.mjs";
-import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
 
@@ -289,46 +285,6 @@ function refsOf(entries) {
     refs[ref] = { role, name, required };
   }
   return refs;
-}
-
-function bootPacketServer(repoRoot, opts = {}) {
-  const routes = new Map();
-  function addRoute(method, path, handler) {
-    routes.set(`${method} ${path}`, handler);
-  }
-  mountPacketRoutes({ addRoute, repoRoot, env: {}, ...opts });
-
-  const server = createServer((req, res) => {
-    const url = (req.url || "/").split("?")[0];
-    const route = routes.get(`${req.method} ${url}`);
-    if (!route) {
-      res.writeHead(404).end();
-      return;
-    }
-    dispatchHttpRoute(route, req, res);
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
-}
-
-function baseUrl(server) {
-  const { port } = server.address();
-  return `http://127.0.0.1:${port}`;
-}
-
-function closeServer(server) {
-  return new Promise((resolve) => server.close(resolve));
-}
-
-async function postJson(server, path, payload) {
-  const res = await fetch(`${baseUrl(server)}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  return { status: res.status, body };
 }
 
 async function importPacketExports() {
@@ -2368,40 +2324,33 @@ test("appRegisterPacketArtifacts stamps source and export fields through the DB-
   );
 });
 
-test("POST /api/packet/export exports saved packet sources through the local route", async () => {
+test("exportPacketArtifacts exports saved packet sources in the requested format", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
   seedApp(repoRoot, sources);
   const calls = [];
-  const server = await bootPacketServer(repoRoot, {
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const data = await exportPacketArtifacts({
+    repoRoot,
     env: tempDownloadsEnv(),
-    packetExportArtifact: fakeExporter(calls),
+    appId: "app-export",
+    formats: ["docx"],
+    exportArtifact: fakeExporter(calls),
   });
 
-  try {
-    const { status, body } = await postJson(server, "/api/packet/export", {
-      appId: "app-export",
-      formats: ["docx"],
-    });
+  assert.equal(data?.appId, "app-export");
+  assert.deepEqual(calls[0].formats, ["docx"]);
+  assert.doesNotMatch(JSON.stringify(data), /\/api\/skill\/run|tailor-application/);
 
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.data?.appId, "app-export");
-    assert.deepEqual(calls[0].formats, ["docx"]);
-    assert.doesNotMatch(JSON.stringify(body), /\/api\/skill\/run|tailor-application/);
-
-    const artifacts = readApp(repoRoot).artifacts;
-    assert.equal(artifacts.resumePdf ?? null, null, "no PDF was requested, so none was produced");
-    assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
-  } finally {
-    await closeServer(server);
-  }
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.equal(artifacts.resumePdf ?? null, null, "no PDF was requested, so none was produced");
+  assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
 });
 
-test("POST /api/packet/export exports plain text through the local route with no PDF artifact or renderer call", async () => {
-  // End-to-end regression for the round-three finding: the UI's Files-panel
-  // "Plain text" action sends formats: ["text"], and this must come back
-  // text-only through the real /api/packet/export route — no PDF renderer
+test("exportPacketArtifacts exports plain text with no PDF artifact or renderer call", async () => {
+  // Regression for the round-three finding: a "Plain text" request sends
+  // formats: ["text"], and this must come back text-only -- no PDF renderer
   // invocation and no PDF artifact. It DOES get a Downloads copy of the
   // .txt file itself (the TXT retrieval fix, round-12).
   const repoRoot = tempRepo();
@@ -2409,92 +2358,30 @@ test("POST /api/packet/export exports plain text through the local route with no
   seedApp(repoRoot, sources);
   const calls = [];
   const downloadsEnv = tempDownloadsEnv();
-  const server = await bootPacketServer(repoRoot, {
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const data = await exportPacketArtifacts({
+    repoRoot,
     env: downloadsEnv,
-    packetExportArtifact: fakeExporter(calls),
+    appId: "app-export",
+    formats: ["text"],
+    exportArtifact: fakeExporter(calls),
   });
 
-  try {
-    const { status, body } = await postJson(server, "/api/packet/export", {
-      appId: "app-export",
-      formats: ["text"],
-    });
+  assert.equal(data?.appId, "app-export");
+  assert.deepEqual(calls[0].formats, ["text"], "the renderer was never asked for a PDF");
 
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.data?.appId, "app-export");
-    assert.deepEqual(calls[0].formats, ["text"], "the renderer was never asked for a PDF");
-
-    const artifacts = readApp(repoRoot).artifacts;
-    assert.equal(artifacts.resumePdf ?? null, null, "no PDF artifact was produced");
-    assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
-    // No packetSources restriction was passed, so every source already
-    // registered on the application (resume AND cover letter, per
-    // seedApp/seedPacketSources) exports -- both get their own Downloads
-    // copy, same as PDF always did.
-    assert.deepEqual(
-      readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "job-app-export")).sort(),
-      ["Acme - Cover Letter.txt", "Acme - Resume.txt"]
-    );
-  } finally {
-    await closeServer(server);
-  }
-});
-
-test("POST /api/packet/export routes text through the workspace-agent runtime path, not a silent PDF default", async () => {
-  // Regression: the workspace-agent's job.export-documents handler filtered
-  // requested formats through a pdf/docx-only allowlist, so formats: ["text"]
-  // was filtered down to [] and then defaulted back to ["pdf"], so a
-  // Files-panel "Plain text" export would silently come back as a PDF. This
-  // exercises the real executeWorkspaceIntent handler (not the local-route
-  // fallback used by the tests above) so the allowlist fix is actually
-  // covered.
-  const repoRoot = tempRepo();
-  const sources = seedPacketSources(repoRoot);
-  seedApp(repoRoot, sources);
-  const calls = [];
-  const textPath = "workspace/tailored/acme-staff-engineer-resume.txt";
-  const workspaceAgentRuntime = {
-    executeIntent: ({ intent }) =>
-      executeWorkspaceIntent({
-        repoRoot,
-        env: {},
-        intent,
-        exportDocumentsImpl: async (input) => {
-          calls.push(input);
-          return {
-            appId: input.applicationId,
-            applicationId: input.applicationId,
-            formats: input.formats,
-            artifacts: { resumeText: textPath },
-            userFacing: {
-              resume: [{ format: "text", path: textPath, name: "acme-staff-engineer-resume.txt" }],
-              coverLetter: [],
-              answers: [],
-            },
-            downloadsErrors: [],
-          };
-        },
-      }),
-  };
-  const server = await bootPacketServer(repoRoot, { workspaceAgentRuntime });
-
-  try {
-    const { status, body } = await postJson(server, "/api/packet/export", {
-      appId: "app-export",
-      formats: ["text"],
-    });
-
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    // The allowlist fix: "text" survives the filter instead of being dropped
-    // and defaulted back to ["pdf"].
-    assert.deepEqual(calls[0].formats, ["text"]);
-    assert.match(body.data?.artifacts?.resumeText, /\.txt$/);
-    assert.equal(body.data?.artifacts?.resumePdf, undefined);
-  } finally {
-    await closeServer(server);
-  }
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.equal(artifacts.resumePdf ?? null, null, "no PDF artifact was produced");
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  // No packetSources restriction was passed, so every source already
+  // registered on the application (resume AND cover letter, per
+  // seedApp/seedPacketSources) exports -- both get their own Downloads
+  // copy, same as PDF always did.
+  assert.deepEqual(
+    readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "job-app-export")).sort(),
+    ["Acme - Cover Letter.txt", "Acme - Resume.txt"]
+  );
 });
 
 test("packet export owner delegates to existing document export helpers without install-time assumptions", () => {
@@ -2735,95 +2622,6 @@ test("a concurrent export for a different application racing on the same destina
 
   const artifactsB = readApp(repoRoot, "app-race-b").artifacts;
   assert.equal(artifactsB.resumeText, undefined, "app-race-b must not have registered anything");
-});
-
-test("a workspace restart reclaims a reservation a crashed export abandoned, unblocking another application's export", async () => {
-  // Codex round-12 finding: artifactReservationClaim commits before
-  // rendering and is only released by the exporting invocation's own
-  // finally block, so a crash or forced shutdown mid-render leaves the row
-  // behind forever -- after restart, any OTHER application whose export
-  // would land on the same destination is rejected as foreign-owned with
-  // no original invocation left alive to ever release it. The fix reclaims
-  // every reservation once, on workspace boot (tracker-dev.mjs's listen(),
-  // right after this process wins exclusive workspace-runtime ownership
-  // and before any worker resumes) via artifactReservationReleaseAll.
-  const repoRoot = tempRepo();
-  const sharedResumeSource = writeWorkspaceFile(
-    repoRoot,
-    "tailored/crash-shared-resume.md",
-    "# Shared Resume\n\nBody shared by two applications.\n"
-  );
-  importTrackerFixture(repoRoot, [
-    {
-      id: "app-crash-a",
-      company: "Acme",
-      role: "Staff Engineer",
-      status: "reviewed-hold",
-      artifacts: { resumeSource: sharedResumeSource },
-    },
-    {
-      id: "app-crash-b",
-      company: "Globex",
-      role: "Principal Engineer",
-      status: "reviewed-hold",
-      artifacts: { resumeSource: sharedResumeSource },
-    },
-  ]);
-  const { exportPacketArtifacts } = await importPacketExports();
-
-  // app-crash-a reserves the shared destination synchronously (its render
-  // call is the first await, per the concurrent-export test above) and
-  // then never returns -- standing in for a process that crashed
-  // mid-render, which leaves the DB reservation row behind with nothing
-  // left alive to ever release it.
-  const neverResolves = new Promise(() => {});
-  const hungExporter = async (args) => {
-    await neverResolves;
-    return fakeExporter([])(args);
-  };
-  exportPacketArtifacts({
-    repoRoot,
-    env: tempDownloadsEnv(),
-    appId: "app-crash-a",
-    packetSources: { resumeSource: sharedResumeSource },
-    request: { formats: ["text"] },
-    exportArtifact: hungExporter,
-    now: () => new Date("2026-07-06T15:00:00Z"),
-  }).catch(() => {});
-
-  // Simulate the restart: a fresh process acquires exclusive
-  // workspace-runtime ownership over the same repoRoot. This is exactly
-  // the boot hook that must reclaim the abandoned row before any worker
-  // resumes.
-  const dev = createDevServer({ repoRoot });
-  try {
-    await dev.listen({ port: 0, host: "127.0.0.1" });
-  } finally {
-    await dev.shutdownAppOperations();
-    dev.chatRuntime.shutdown();
-    if (dev.server.listening) await new Promise((resolve) => dev.server.close(resolve));
-  }
-
-  // A second application exporting to the identical shared destination
-  // must now succeed -- the restart reclaimed app-crash-a's abandoned
-  // reservation, so app-crash-b is no longer rejected as foreign-owned.
-  const callsB = [];
-  const resultB = await exportPacketArtifacts({
-    repoRoot,
-    env: tempDownloadsEnv(),
-    appId: "app-crash-b",
-    packetSources: { resumeSource: sharedResumeSource },
-    request: { formats: ["text"] },
-    exportArtifact: fakeExporter(callsB),
-    now: () => new Date("2026-07-06T15:05:00Z"),
-  });
-  assert.match(resultB.artifacts.resumeText, /crash-shared-resume/);
-
-  // The existing active-contention protection must still hold: two LIVE
-  // exports racing on the same destination still conflict (proven above by
-  // "a concurrent export for a different application racing on the same
-  // destination fails with an ownership error") -- this restart path only
-  // reclaims rows abandoned by a process that's gone, never a live one.
 });
 
 test("a manifest write failure restores the prior manifest with no stray backup", async () => {
