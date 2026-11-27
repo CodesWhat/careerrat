@@ -3133,12 +3133,11 @@ function normalizedCodexActivity(message, { sessionId } = {}) {
   const isScopedTool =
     item.type === "mcp_tool_call" &&
     item.server === SCOPED_TOOLS_SERVER_NAME &&
-    ["fetch", "read_staged_input"].includes(item.tool);
+    item.tool === "fetch";
   if (!isSearch && !isScopedTool) return [];
-  const isRead = isScopedTool && item.tool === "read_staged_input";
   const query = String(item.query || item.action?.query || "").trim();
   const url = String(item.arguments?.url || "").trim();
-  const name = isSearch ? "WebSearch" : isRead ? "Read" : "WebFetch";
+  const name = isSearch ? "WebSearch" : "WebFetch";
   if (message.type === "item.started") {
     return [
       {
@@ -3150,7 +3149,7 @@ function normalizedCodexActivity(message, { sessionId } = {}) {
               type: "tool_use",
               id: item.id,
               name,
-              input: isSearch ? (query ? { query } : {}) : isRead ? {} : url ? { url } : {},
+              input: isSearch ? (query ? { query } : {}) : url ? { url } : {},
             },
           ],
         },
@@ -3159,9 +3158,9 @@ function normalizedCodexActivity(message, { sessionId } = {}) {
   }
   if (message.type === "item.completed") {
     const failed = item.status === "failed" || Boolean(item.error);
-    const subject = isSearch ? query : isRead ? "staged input" : url;
-    const completed = isSearch ? "Search completed" : isRead ? "Read" : "Fetched";
-    const failedLabel = isSearch ? "Search failed" : isRead ? "Read failed" : "Fetch failed";
+    const subject = isSearch ? query : url;
+    const completed = isSearch ? "Search completed" : "Fetched";
+    const failedLabel = isSearch ? "Search failed" : "Fetch failed";
     return [
       {
         type: "user",
