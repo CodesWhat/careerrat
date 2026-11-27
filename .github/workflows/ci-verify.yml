@@ -1,8 +1,16 @@
 name: ci
 
 # Nine jobs. Every job is declared as a required context in
-# scripts/protect-main.sh so deterministic product builds and real-browser
-# application preparation fail closed with the core test gates.
+# scripts/protect-main.sh so deterministic builds and real-browser application
+# preparation fail closed with the core test gates.
+#
+# The product is the npm package and its TUI. Three job names are kept only
+# because the main ruleset requires them by name, and a missing job never
+# satisfies a required context: web-build now runs the packed npm install
+# smoke, windows-package-smoke runs the [win32] installed-runtime tests plus
+# the same smoke on Windows, and browser-application-prep runs the real-Chromium
+# application-preparation tests. Rename them only together with the ruleset and
+# scripts/protect-main.sh.
 #
 # structure-guards runs a fast fail-early subset: the checks that protect the
 # things unit tests can't reach. The retired static dashboard must stay gone,
@@ -241,8 +249,8 @@ jobs:
           # docs it embeds, and the shared inputs.
           site=false
           if grep -Eq "$shared|^apps/(website|docs)/" <<<"$files"; then site=true; fi
-          # web-build, browser-application-prep: the SPA plus the product code
-          # and fixtures its imports and Playwright tests reach. Other apps,
+          # web-build, browser-application-prep: the npm package inputs plus the
+          # product code and fixtures the Playwright tests reach. Other apps,
           # docs, markdown, other workflows and unit tests outside the
           # Playwright set cannot reach them.
           ignorable='^(apps/(website|docs|desktop)|docs|examples|\.github)/|\.md$|^LICENSE$|^tests/'
@@ -254,11 +262,13 @@ jobs:
           emit "$web" "$site"
           echo "web=$web site=$site"
 
-  # M7 — builds the apps/web SPA shell as its own required product gate.
+  # Packs the npm package and installs the tarball into an empty project with
+  # --omit=dev, the shape a real `npm i -g careerrat` sees. The job name stays
+  # `web-build` because the main ruleset requires that context.
   web-build:
     name: web-build
     needs: changes
-    # Required on main only. On a dev PR, run when the web app or the code it imports changed,
+    # Required on main only. On a dev PR, run when the npm package inputs changed,
     # or when the changes job did not succeed (fail closed).
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
@@ -268,7 +278,7 @@ jobs:
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: block
-          # checkout + npm ci + npm run build; observed on run 32512881196
+          # checkout + npm ci + packed install smoke; endpoints observed on run 32512881196
           # (Stable baseline, 152 runs since the endpoint set last changed).
           allowed-endpoints: >
             github.com:443
@@ -334,8 +344,10 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
-      - name: Build the web app shell (apps/web)
-        run: npm run build --workspace apps/web
+      - name: List the files the npm package would publish
+        run: npm pack --dry-run --json --ignore-scripts > /dev/null
+      - name: Packed npm install smoke (pack, install --omit=dev, run the bin)
+        run: node scripts/smoke-packed-install.mjs
 
   # The marketing site plus the Fumadocs docs it embeds. `npm run build
   # --workspace apps/website` chains build-docs-content.mjs, the apps/docs
@@ -529,10 +541,9 @@ jobs:
       - name: Render the built site in all three browsers at desktop and phone widths
         run: npm run test:website-browser
 
-  # Builds the real Windows installer on promotion PRs and main pushes and drives it through
-  # silent install, packaged Electron mount, PDF export, bundled Playwright
-  # Chromium launch, and uninstall. It is intentionally unsigned here and
-  # retained only as a short-lived Actions QA artifact.
+  # Windows evidence for the npm package on promotion PRs and main pushes: the
+  # [win32] installed-runtime tests, then the packed npm install smoke run on
+  # a real Windows runner.
   windows-package-smoke:
     name: windows-package-smoke
     # Release gate: promotion PRs into main and pushes to main only, no path trigger.
@@ -540,7 +551,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Harden the runner (audit Electron and Chromium downloads)
+      - name: Harden the runner (audit npm registry downloads)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
@@ -621,17 +632,9 @@ jobs:
         # ones actually gated to run only on native Windows -- instead of
         # running either suite in full.
         run: node --test --test-name-pattern "\[win32\]" tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
-      - name: Build the Windows x64 NSIS installer
-        run: npm run dist:windows --workspace apps/desktop
-      - name: Verify install, packaged smoke, and uninstall
-        run: npm run verify:windows --workspace apps/desktop
-      - name: Retain the unsigned installer for QA only
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: careerrat-windows-x64-unsigned-qa
-          path: apps/desktop/dist/CareerRat-*-win-x64-Setup.exe
-          if-no-files-found: error
-          retention-days: 7
+      - name: Packed npm install smoke (pack, install --omit=dev, run the bin)
+        shell: bash
+        run: node scripts/smoke-packed-install.mjs
 
   # Exercises the real Chromium application-preparation boundary without any
   # provider call, login, final Submit click, or Applied write. The fixtures
@@ -643,8 +646,9 @@ jobs:
       run:
         shell: bash
     needs: changes
-    # Required on main only. On a dev PR, run when the web app or the code it imports changed,
-    # or when the changes job did not succeed (fail closed).
+    # Required on main only. On a dev PR, run when the npm package inputs or the
+    # code the Playwright tests reach changed, or when the changes job did not
+    # succeed (fail closed).
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     # Playwright's own image carries the OS libraries and all three browsers
@@ -726,30 +730,11 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
-      - name: Build the app used by the visual contract
-        run: npm run build --workspace apps/web
-      - name: Verify application preparation and rendered workspace geometry
+      - name: Verify application preparation
         # Serialized on purpose. Each of these files drives its own real
         # Chromium, and node --test runs files in parallel by default, so on a
-        # hosted runner all three launch browsers at once and starve each other.
-        # The render-bound visual contract is the one that loses: it takes ~2s
-        # alone, ~4s alongside the other two on a 14-core box, and blew past its
-        # 30s budget twice on a 4-vCPU runner while the fixed-wait dropdown tests
-        # next to it barely moved.
-        run: node --test --test-concurrency=1 tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs tests/playwright-app-visual.test.mjs
-      - name: Retain the rendered workspace screenshot
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: careerrat-browser-visual
-          path: output/playwright
-          # warn, not error: this step runs on failure too, and a test that
-          # times out before it screenshots leaves the path empty. Erroring
-          # there replaces the real failure with "No files were found" and
-          # uploads nothing, which is exactly when the trace is needed. The
-          # test step already failed the job, so the signal is not lost.
-          if-no-files-found: warn
-          retention-days: 7
+        # hosted runner they launch browsers at once and starve each other.
+        run: node --test --test-concurrency=1 tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs
 
   # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
   # .qlty/qlty.toml; Biome stays out of qlty and lints JS/JSON separately).
