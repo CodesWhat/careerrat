@@ -17,6 +17,12 @@ export function loadPersonalSentinels({ env = process.env, defaultPath = DEFAULT
         env.CAREERRAT_PERSONAL_SENTINELS_REQUIRED !== "1"
       )
         return [];
+      if (error.code === "ENOENT" && env.CAREERRAT_PERSONAL_SENTINELS_REQUIRED === "1") {
+        throw new Error(
+          "Private sentinel configuration is required but missing. Copy .internal/personal-sentinels.json " +
+            "into this checkout (or set CAREERRAT_PERSONAL_SENTINELS_FILE) before tagging."
+        );
+      }
       throw new Error("Private sentinel configuration is missing or unreadable.");
     }
   }

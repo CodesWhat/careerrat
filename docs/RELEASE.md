@@ -41,9 +41,17 @@ Before tagging a release:
 8. `README.md` version badge is still the dynamic npm badge
    (`img.shields.io/npm/v/careerrat`, not a hardcoded version) and the install
    snippet still resolves correctly.
-9. Git tag created with the concrete release version, for example
+9. **Run the publish checks before tagging.** `npm run release:pretag` on the
+   release branch head and again on the promotion head (the commit that will be
+   tagged). Tag only after both pass. It runs the release tests including
+   `tests/release-safety.test.mjs`, `npm publish --dry-run --ignore-scripts`
+   and the packed-install smoke, and it fails (instead of skipping) when
+   `.internal/personal-sentinels.json` is missing. v0.26.0 was tagged and then
+   failed the publish workflow on the personal sentinel check, because the
+   pre-tag run skipped that test on a checkout without the list.
+10. Git tag created with the concrete release version, for example
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
-10. GitHub release created from the tag with changelog notes.
+11. GitHub release created from the tag with changelog notes.
 
 The maintainer's personal privacy sentinels live in the ignored
 `.internal/personal-sentinels.json` file as a nonempty JSON array of strings.

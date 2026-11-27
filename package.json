@@ -96,7 +96,7 @@
     "site:build": "npm --workspace @careerrat/website run build",
     "docs:dev": "npm --workspace @careerrat/docs run dev",
     "docs:build": "npm --workspace @careerrat/docs run build",
-    "release:pretag": "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs",
+    "release:pretag": "node scripts/release-pretag.mjs",
     "qa:native-search:evidence": "node scripts/verify-live-search-receipts.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

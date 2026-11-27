@@ -2490,16 +2490,28 @@ test("paid native AI certification is separate from deterministic release gates"
     source("scripts/verify-live-search-receipts.mjs"),
   ]);
   const pkg = JSON.parse(rootPackage);
-  assert.equal(
-    pkg.scripts?.["release:pretag"],
-    "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs"
-  );
+  assert.equal(pkg.scripts?.["release:pretag"], "node scripts/release-pretag.mjs");
   assert.equal(
     pkg.scripts?.["qa:native-search:evidence"],
     "node scripts/verify-live-search-receipts.mjs"
   );
   assert.doesNotMatch(rootVerify, /releaseVersion|EXCEPTION/);
   assert.match(rootVerify, /PASS native AI search certification evidence/);
+});
+
+test("release:pretag runs release-safety, the publish dry run and the packed-install smoke with the private sentinel list required", async () => {
+  const pretag = await source("scripts/release-pretag.mjs");
+  for (const file of [
+    "tests/release-consistency.test.mjs",
+    "tests/release-gating-ci.test.mjs",
+    "tests/release-workflow-chain.test.mjs",
+    "tests/release-safety.test.mjs",
+  ]) {
+    assert.ok(pretag.includes(`"${file}"`), `release:pretag must run ${file}`);
+  }
+  assert.match(pretag, /CAREERRAT_PERSONAL_SENTINELS_REQUIRED: "1"/);
+  assert.match(pretag, /"publish", "--dry-run", "--ignore-scripts"/);
+  assert.match(pretag, /"smoke:packed-install"/);
 });
 
 test("release docs keep paid native-runtime certification off the release blocker", async () => {
