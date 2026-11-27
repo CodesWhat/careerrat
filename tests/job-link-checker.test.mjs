@@ -182,24 +182,137 @@ test("checkUrlLiveness: network failure keeps the underlying cause in the reason
   assert.match(result.reason, /ENOTFOUND/);
 });
 
-test("htmlToText scales linearly with repeated unclosed openers", () => {
-  const time = (unit, n) => {
-    const html = unit.repeat(n);
-    const start = process.hrtime.bigint();
-    htmlToText(html);
-    return Number(process.hrtime.bigint() - start);
+// Reference copy of the pre-18583e1f implementation, for differential checks.
+function referenceHtmlToText(html = "") {
+  return String(html)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const DIFFERENTIAL_CASES = [
+  "<!-- <script> -->Keep me<script>code</script>After",
+  "<!-- <style> -->x<style>p{}</style>y",
+  "<script>a</script><script>b</script>c",
+  "<SCRIPT>x</SCRIPT>y<StYlE>z</sTyLe>w",
+  "<script <script>x</script>y",
+  "<script><script>x</script>y</script>z",
+  "<style><style>x</style>y</style>z",
+  '<a title=">">link</a>',
+  '<script type="a>b">x</script>after',
+  "<script>x</script",
+  "<script>x</script >y",
+  "<script>x</scr</script>y",
+  "<script>never closed",
+  "<style>never closed",
+  "<script>x</script<b>y",
+  "a <> b < c",
+  "x <a <b> y",
+  "< a>b",
+  "<scripts>keep</scripts><styles>k</styles>",
+  "<script_x>keep</script_x>",
+  "&amp; &lt;b&gt; &#39;x&#39; &nbsp;",
+  "a<b",
+  "text with a stray > and <",
+  "<style>a</style><script>b</style></script>c",
+  "<script>a<style>b</script>c</style>d",
+];
+
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  for (const unit of ["<script>x ", "<style>x ", "<a ", "</script x "]) {
-    time(unit, 2000); // warm up
-    let best = Infinity;
-    for (let i = 0; i < 3; i += 1) {
-      const small = Math.max(time(unit, 5000), 1e5);
-      const large = time(unit, 50000);
-      best = Math.min(best, large / small);
-    }
-    // Linear is about 10x; quadratic is about 100x.
-    assert.ok(best < 30, `${JSON.stringify(unit)} grew ${best.toFixed(1)}x for 10x input`);
+}
+
+test("htmlToText matches the old regex chain on hand cases", () => {
+  for (const html of DIFFERENTIAL_CASES) {
+    assert.equal(htmlToText(html), referenceHtmlToText(html), JSON.stringify(html));
   }
+  assert.equal(htmlToText("<!-- <script> -->Keep me<script>code</script>After"), "<!-- After");
+});
+
+test("htmlToText matches the old regex chain on seeded random HTML", () => {
+  const tokens = [
+    "<",
+    ">",
+    "</",
+    "/",
+    "<script",
+    "<SCRIPT",
+    "</script",
+    "</SCRIPT",
+    "<style",
+    "<STYLE",
+    "</style",
+    "</STYLE",
+    "<scripts",
+    "<a",
+    "<b>",
+    "</b>",
+    '"',
+    "'",
+    "=",
+    "&amp;",
+    "&lt;",
+    "<!--",
+    "-->",
+    " ",
+    "\n",
+    "x",
+    "word",
+    "_",
+    "1",
+    "\u017f",
+    "\u212a",
+  ];
+  const random = seededRandom(0xc0ffee);
+  for (let n = 0; n < 4000; n += 1) {
+    const length = 1 + Math.floor(random() * 14);
+    let html = "";
+    for (let k = 0; k < length; k += 1) html += tokens[Math.floor(random() * tokens.length)];
+    assert.equal(htmlToText(html), referenceHtmlToText(html), JSON.stringify(html));
+  }
+});
+
+test("htmlToText does a bounded amount of scanning on adversarial input", () => {
+  const units = [
+    "<script>x ",
+    "<style>x ",
+    "<a ",
+    "</script x ",
+    "<script>x</scr ",
+    "<style>x</sty ",
+    "<script></scr<script></scr",
+    "<script>x</script",
+    "<",
+  ];
+  for (const unit of units) {
+    for (const n of [2000, 20000]) {
+      const html = unit.repeat(n);
+      const probe = { steps: 0 };
+      htmlToText(html, probe);
+      // Three forward-only passes, each touching an index a small constant
+      // number of times. Quadratic input would be in the millions here.
+      assert.ok(
+        probe.steps <= 12 * html.length,
+        `${JSON.stringify(unit)} x${n} took ${probe.steps} steps for ${html.length} chars`
+      );
+    }
+  }
+});
+
+test("htmlToText wall-clock smoke check on adversarial input", () => {
+  const html = "<script>x</scr ".repeat(100000);
+  const start = process.hrtime.bigint();
+  htmlToText(html);
+  assert.ok(Number(process.hrtime.bigint() - start) < 2e9);
 });
 
 test("htmlToText keeps its existing behavior", () => {

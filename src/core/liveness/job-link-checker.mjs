@@ -5,60 +5,93 @@ import { APPLY_PATTERNS, classifyLiveness, primaryPostingText } from "./liveness
 
 const LIVENESS_MAX_BYTES = 1024 * 1024;
 
-const WORD_CHAR = /\w/;
+const isWordCode = (code) =>
+  (code >= 48 && code <= 57) ||
+  (code >= 65 && code <= 90) ||
+  code === 95 ||
+  (code >= 97 && code <= 122);
 
-// One forward pass. Every search below only moves forward, and a search that
-// finds nothing is remembered, so repeated unclosed openers cost O(1) each.
-// Matches what the old chain of regexes produced: script and style blocks
-// that close are dropped, every other tag becomes a space, and a stray "<"
-// with no ">" after it stays as text.
-export function htmlToText(html = "") {
-  const input = String(html);
-  const length = input.length;
+// ASCII case-insensitive compare of a fixed-width lowercase word at index i.
+function matchesAt(input, i, word) {
+  if (i + word.length > input.length) return false;
+  for (let k = 0; k < word.length; k += 1) {
+    let code = input.charCodeAt(i + k);
+    if (code >= 65 && code <= 90) code += 32;
+    if (code !== word.charCodeAt(k)) return false;
+  }
+  return true;
+}
+
+// indexOf that records how far it scanned, so tests can bound total work.
+function find(input, needle, from, probe) {
+  const at = input.indexOf(needle, from);
+  if (probe) probe.steps += (at === -1 ? input.length : at + 1) - from + 1;
+  return at;
+}
+
+// Drops every <name ...> ... </name ...> block, like
+// /<name\b[^>]*>[\s\S]*?<\/name[^>]*>/gi. The first failed attempt means every
+// later one fails too (a later closer can only sit further right), so the
+// scan stops there. The closer search is a forward-only fixed-width scan.
+function stripBlocks(input, name, probe) {
+  const open = `<${name}`;
+  const close = `</${name}`;
   const parts = [];
-  let nextGt = -2;
-  const gtFrom = (from) => {
-    if (nextGt === -1) return -1;
-    if (nextGt < from) nextGt = input.indexOf(">", from);
-    return nextGt;
-  };
-  const closers = { script: /<\/script[^>]*>/gi, style: /<\/style[^>]*>/gi };
-  const noCloserAfter = { script: Infinity, style: Infinity };
-  const closerFrom = (name, from) => {
-    if (from >= noCloserAfter[name]) return null;
-    const re = closers[name];
-    re.lastIndex = from;
-    const match = re.exec(input);
-    if (!match) noCloserAfter[name] = from;
-    return match;
-  };
-
   let textStart = 0;
-  let i = input.indexOf("<");
+  let i = find(input, "<", 0, probe);
   while (i !== -1) {
-    const gt = gtFrom(i + 1);
-    if (gt === -1) break;
-    let end = -1;
-    const lead = input.slice(i, i + 7).toLowerCase();
-    const name = lead === "<script" ? "script" : lead.startsWith("<style") ? "style" : "";
-    if (name) {
-      const afterName = i + 1 + name.length;
-      if (!WORD_CHAR.test(input[afterName] ?? "")) {
-        const closer = closerFrom(name, gt + 1);
-        if (closer) end = closer.index + closer[0].length;
+    if (matchesAt(input, i, open) && !isWordCode(input.charCodeAt(i + open.length))) {
+      const gt = find(input, ">", i + open.length, probe);
+      if (gt === -1) break;
+      let closer = find(input, "</", gt + 1, probe);
+      while (closer !== -1 && !matchesAt(input, closer, close)) {
+        closer = find(input, "</", closer + 1, probe);
       }
-    }
-    if (end === -1 && gt > i + 1) end = gt + 1;
-    if (end === -1) {
-      i = input.indexOf("<", i + 1);
+      if (closer === -1) break;
+      const end = find(input, ">", closer + close.length, probe);
+      if (end === -1) break;
+      parts.push(input.slice(textStart, i), " ");
+      textStart = end + 1;
+      i = find(input, "<", textStart, probe);
       continue;
     }
-    parts.push(input.slice(textStart, i), " ");
-    textStart = end;
-    i = end < length ? input.indexOf("<", end) : -1;
+    i = find(input, "<", i + 1, probe);
   }
+  if (parts.length === 0) return input;
   parts.push(input.slice(textStart));
-  return parts.join("").replace(/\s+/g, " ").trim();
+  return parts.join("");
+}
+
+// Replaces every <[^>]+> with a space. A "<" followed by ">" or the end is
+// left alone; once no ">" remains nothing further can match.
+function stripTags(input, probe) {
+  const parts = [];
+  let textStart = 0;
+  let i = find(input, "<", 0, probe);
+  while (i !== -1) {
+    if (i + 1 < input.length && input.charCodeAt(i + 1) !== 62) {
+      const gt = find(input, ">", i + 1, probe);
+      if (gt === -1) break;
+      parts.push(input.slice(textStart, i), " ");
+      textStart = gt + 1;
+      i = find(input, "<", textStart, probe);
+      continue;
+    }
+    i = find(input, "<", i + 1, probe);
+  }
+  if (parts.length === 0) return input;
+  parts.push(input.slice(textStart));
+  return parts.join("");
+}
+
+// Same output as the old chain of regex replaces (script blocks, then style
+// blocks, then every other tag), each pass in linear time. `probe` is an
+// optional { steps } counter that tests use to bound the work.
+export function htmlToText(html = "", probe = null) {
+  let text = stripBlocks(String(html), "script", probe);
+  text = stripBlocks(text, "style", probe);
+  text = stripTags(text, probe);
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export function extractApplyControlsFromHtml(html = "") {
