@@ -149,6 +149,52 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_cancelling_the_person_picker_sends_no_switch(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        sent = []
+
+        async def record(message):
+            sent.append(message)
+
+        app.send = record
+        # Escape and Cancel dismiss with None; that is not "your own workspace".
+        app.pick_person("ada", None)
+        await asyncio.sleep(0.05)
+        self.assertEqual(sent, [])
+        self.assertFalse(app.switching)
+        # The owner entry is a real choice and does switch.
+        app.pick_person("ada", "")
+        await asyncio.sleep(0.05)
+        self.assertEqual(sent, [{"op": "switch-person", "person": None}])
+        self.assertTrue(app.switching)
+
+    async def test_actions_are_blocked_during_a_switch_and_tagged_with_the_generation(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        written = []
+
+        class Stdin:
+            def write(self, data):
+                written.append(json.loads(data))
+
+            async def drain(self):
+                pass
+
+        app.proc = SimpleNamespace(returncode=None, stdin=Stdin())
+        await app.send({"op": "refresh"})
+        self.assertEqual(written, [{"op": "refresh", "generation": 0}])
+        app.switching = True
+        await app.send({"op": "search-start"})
+        await app.send({"op": "request", "action": "review"})
+        self.assertEqual(len(written), 1, "workspace actions wait for the switch")
+        await app.send({"op": "switch-person", "person": "ada"})
+        self.assertEqual(written[-1]["op"], "switch-person")
+        self.assertFalse(app.check_action("request", ()))
+        # A refused switch ends the wait without changing the workspace.
+        app.switching = False
+        app.generation = 3
+        await app.send({"op": "refresh"})
+        self.assertEqual(written[-1], {"op": "refresh", "generation": 3})
+
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
     )
