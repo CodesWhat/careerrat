@@ -228,3 +228,6 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
   `content=true` read. Upstream only fetches it on the oversized-board fallback.
   Inline office names still win where a posting has them. The greenhouse fixture
   changed to match.
+- `peoplesoft.mjs`: detail descriptions go through `htmlToTextCapture` and
+  `capDescriptionText` (64 KiB byte cap) instead of upstream's 4000-char slice,
+  and `descriptionPartial` is propagated to the job when the cap trims one.

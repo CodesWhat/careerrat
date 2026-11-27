@@ -1456,6 +1456,65 @@ try {
       );
     }
   }
+
+  // ── fetchDetails: description caps and PostingSeq fallthrough (CareerRat) ──
+
+  {
+    const searchHtml = `<form name="win0" action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+      <span id="win0divHRS_AGNT_RSLT_Irowcnt$0">1-1 of 1 Results</span>
+      <li id="HRS_AGNT_RSLT_I$0_row_0"><a id="SCH_JOB_TITLE$0">Instructional Designer</a><span id="HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0">JR00012345</span><span id="LOCATION$0">Toronto</span></li>
+      </form>`;
+    const detailWith = (bodyText) =>
+      `<span id="HRS_SCH_WRK2_HRS_JOB_OPENING_ID">JR00012345</span><span id="HRS_SCH_WRK2_POSTING_TITLE">Instructional Designer</span>
+      <div id='win0divHRS_SCH_PSTDSC_row$0'><span id='HRS_SCH_PSTDSC_DESCRLONG$0'>${bodyText}</span></div>`;
+    const entry = {
+      name: "ExampleU",
+      careers_url: SEARCH_URL,
+      peoplesoft: { fetchDetails: true },
+    };
+    const run = async (detailFor) => {
+      const seqs = [];
+      const ctx = {
+        sleep: async () => {},
+        fetchResponse: async (url) => {
+          const u = String(url);
+          const seq = u.match(/PostingSeq=(\d+)/)?.[1];
+          if (!seq) return new Response(searchHtml, { status: 200 });
+          seqs.push(seq);
+          return detailFor(seq);
+        },
+      };
+      const jobs = await peoplesoft.fetch(entry, ctx);
+      return { jobs, seqs };
+    };
+
+    // A description past the old 4000-char slice is kept whole.
+    const longText = "Design learning programs. ".repeat(400); // ~10,400 chars
+    const long = await run(() => new Response(detailWith(longText), { status: 200 }));
+    if (
+      long.jobs[0]?.description?.length > 10_000 &&
+      long.jobs[0]?.descriptionPartial === undefined
+    )
+      pass("fetch() keeps a description past 4000 chars whole and unflagged");
+    else
+      fail(
+        `fetch() long description = ${long.jobs[0]?.description?.length} chars, partial=${long.jobs[0]?.descriptionPartial}`
+      );
+
+    // A description past the byte cap is retained as a prefix and flagged.
+    const hugeText = "Design learning programs. ".repeat(4000); // ~104 KB
+    const huge = await run(() => new Response(detailWith(hugeText), { status: 200 }));
+    if (
+      huge.jobs[0]?.descriptionPartial === true &&
+      Buffer.byteLength(huge.jobs[0]?.description || "", "utf8") <= 64 * 1024 &&
+      huge.jobs[0]?.description?.length > 4000
+    )
+      pass("fetch() flags descriptionPartial when the byte cap trims the description");
+    else
+      fail(
+        `fetch() huge description = ${huge.jobs[0]?.description?.length} chars, partial=${huge.jobs[0]?.descriptionPartial}`
+      );
+  }
 } catch (e) {
   fail(`peoplesoft provider tests crashed: ${e.message}\n${e.stack}`);
 }
