@@ -230,7 +230,22 @@ export default {
 // not with one regex spanning the body, so the check stays linear on a large page.
 function isWholeChannel(xml) {
   if (typeof xml !== 'string') return false;
-  return /<channel\b[^>]*\/>/i.test(xml) || (/<channel\b/i.test(xml) && /<\/channel\s*>/i.test(xml));
+  // CareerRat-local: one forward pass. A `<channel\b[^>]*\/>` regex rescans to
+  // the end of the page from every `<channel` that never closes, which is
+  // quadratic on a page of repeated unterminated openers. Here each opener looks
+  // for the next `>` once, and the scan resumes after it.
+  const opener = /<channel\b/gi;
+  let sawOpener = false;
+  let match;
+  while ((match = opener.exec(xml)) !== null) {
+    sawOpener = true;
+    const end = xml.indexOf('>', match.index);
+    // No `>` anywhere after this opener, so none after a later one either.
+    if (end === -1) break;
+    if (xml[end - 1] === '/') return true;
+    opener.lastIndex = end + 1;
+  }
+  return sawOpener && /<\/channel\s*>/i.test(xml);
 }
 
 // The raw items of a feed page, one identity string each: the link text, or the

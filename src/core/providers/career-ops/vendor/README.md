@@ -233,3 +233,6 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
   and `descriptionPartial` is propagated to the job when the cap trims one.
 - `peoplesoft.mjs`: a 404 or 410 on one `PostingSeq` moves on to the next
   sequence instead of ending the detail loop.
+- `teamtailor.mjs`: `isWholeChannel` checks for a self-closing or closed
+  `<channel>` in one forward pass. Upstream's per-opener regex rescans the page
+  from every unterminated `<channel` and goes quadratic.

@@ -705,6 +705,39 @@ try {
         `self-closing channel: ${closedOut.length} jobs, ${s} requests, truncated=${JSON.stringify(closedOut.truncated)}`
       );
   }
+
+  {
+    // CareerRat: feed validation must stay linear on repeated unterminated
+    // "<channel" openers. A per-opener scan to the end of the page is quadratic.
+    const hostile = "<channel ".repeat(60_000);
+    const started = performance.now();
+    let threw = false;
+    try {
+      await teamtailor.fetch(
+        acme,
+        mkCtx(async () => hostile)
+      );
+    } catch {
+      threw = true;
+    }
+    const elapsed = performance.now() - started;
+    if (threw && elapsed < 1000)
+      pass("teamtailor.fetch() rejects repeated unterminated <channel openers in linear time");
+    else
+      fail(
+        `repeated <channel openers: threw=${threw}, took ${Math.round(elapsed)} ms (limit 1000)`
+      );
+
+    // The single pass still finds a self-closing channel after an unterminated opener text.
+    const mixed = ['<?xml version="1.0"?><rss><channel/></rss>'];
+    let m = 0;
+    const mixedOut = await teamtailor.fetch(
+      acme,
+      mkCtx(async () => mixed[m++] ?? '<?xml version="1.0"?><rss><channel/></rss>')
+    );
+    if (mixedOut.length === 0) pass("teamtailor.fetch() still accepts a self-closing <channel/>");
+    else fail(`self-closing channel read ${mixedOut.length} jobs`);
+  }
 } catch (e) {
   fail(`teamtailor provider tests crashed: ${e.message}`);
 }
