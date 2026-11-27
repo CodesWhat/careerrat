@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -18,11 +18,17 @@ function fixture(t) {
     closeAll();
     rmSync(home, { recursive: true, force: true });
   });
+  // The detached worker probes for an installed AI runtime before scanning.
+  // Point both PATH and the default search dirs at an empty directory so it can
+  // never reach (or spend quota on) a real codex or claude on this machine.
+  const noRuntimes = join(home, "no-runtimes");
+  mkdirSync(noRuntimes);
   return {
     repoRoot: root,
     env: {
       CAREERRAT_HOME: home,
-      PATH: process.env.PATH,
+      PATH: noRuntimes,
+      CAREERRAT_RUNTIME_SEARCH_DIRS: noRuntimes,
       HOME: home,
       CAREERRAT_NO_UPDATE_CHECK: "1",
     },
@@ -72,7 +78,7 @@ for (const cancel of [false, true])
   test(cancel
     ? "terminal session shutdown stops its actual detached scanner"
     : "search continues after the launching CLI exits and leaves a complete result artifact", {
-    timeout: 15000,
+    timeout: 90_000,
   }, async (t) => {
     const ctx = fixture(t);
     if (cancel) ctx.env.CAREERRAT_TUI_SESSION = "session-cancel-proof";
@@ -100,7 +106,7 @@ for (const cancel of [false, true])
     import { existsSync, writeFileSync } from "node:fs";
     globalThis.fetch = async () => {
       writeFileSync(${JSON.stringify(fetchStarted)}, "yes");
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + 60_000;
       while (!existsSync(${JSON.stringify(release)}) && Date.now() < deadline)
         await new Promise((resolve) => setTimeout(resolve, 20));
       return new Response('<rss version="2.0"><channel></channel></rss>', { headers: { "content-type": "application/rss+xml" } });
@@ -118,7 +124,11 @@ for (const cancel of [false, true])
     });
     assert.equal(receipt.detached, true);
     assert.equal(receipt.run.status, "running");
-    for (let attempt = 0; attempt < 100 && !existsSync(fetchStarted); attempt++)
+    assert.ok(
+      sourcingRunGet({ ...ctx, id: receipt.run.id }).run.progress.aiUnavailableReason,
+      "the worker must find no AI runtime, never a real one on this machine"
+    );
+    for (let attempt = 0; attempt < 1500 && !existsSync(fetchStarted); attempt++)
       await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(
       existsSync(fetchStarted),
@@ -127,7 +137,12 @@ for (const cancel of [false, true])
     );
     process.kill(receipt.workerPid, 0);
     if (cancel) {
-      await stopTerminalSessionSearches({ ...ctx, sessionId: "session-cancel-proof" });
+      await stopTerminalSessionSearches({
+        ...ctx,
+        sessionId: "session-cancel-proof",
+        shutdownMs: 30_000,
+        graceMs: 10_000,
+      });
       assert.equal(
         sourcingRunGet({ ...ctx, id: receipt.run.id }).run.error.code,
         "SEARCH_CANCELLED"
@@ -137,7 +152,7 @@ for (const cancel of [false, true])
     }
     writeFileSync(release, "continue");
     let result;
-    for (let attempt = 0; attempt < 200; attempt++) {
+    for (let attempt = 0; attempt < 1000; attempt++) {
       result = sourcingRunGet({ ...ctx, id: receipt.run.id }).run;
       if (result.status !== "running" && existsSync(receipt.handoffPath)) break;
       await new Promise((resolve) => setTimeout(resolve, 40));

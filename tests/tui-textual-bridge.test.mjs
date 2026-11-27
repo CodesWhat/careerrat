@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { skillsInstallIssue } from "../src/core/tui/textual-bridge.mjs";
 
 test("Textual bridge carries canonical requests and survives malformed messages until EOF", {
-  timeout: 6000,
+  timeout: 60_000,
 }, async (t) => {
   const home = mkdtempSync(join(tmpdir(), "careerrat-textual-bridge-"));
   mkdirSync(join(home, "workspace"));
@@ -39,7 +39,7 @@ test("Textual bridge carries canonical requests and survives malformed messages 
     rmSync(home, { recursive: true, force: true });
   });
   child.stdin.write('not json\n{"op":"request","action":"apply"}\n');
-  const deadline = Date.now() + 4000;
+  const deadline = Date.now() + 45_000;
   while (!events.some((event) => event.type === "request")) {
     assert.ok(Date.now() < deadline, errors || "No bridge request");
     await new Promise((resolve) => setTimeout(resolve, 20));

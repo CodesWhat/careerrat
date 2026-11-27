@@ -373,24 +373,44 @@ test("renderResumeText treats an indented continuation as its own nested item, n
 // approach produced (reported at ~7.7s for a 256 KB paragraph).
 // ---------------------------------------------------------------------------
 
-test("renderResumeText parses a paragraph with many inline constructs, at scale, well under a second", () => {
+// Scaling is asserted as a ratio, not an absolute budget: a quadratic parse
+// costs ~100x for 10x the input and a linear one ~10x, which holds on any
+// machine. It measures this process's CPU time rather than wall time, so a
+// loaded machine descheduling the run doesn't inflate a sample, and takes the
+// best of five to shed GC pauses.
+function bestCpuMs(markdown, runs = 5) {
+  let best = Infinity;
+  for (let n = 0; n < runs; n++) {
+    const before = process.cpuUsage();
+    renderResumeText(markdown);
+    const used = process.cpuUsage(before);
+    best = Math.min(best, (used.user + used.system) / 1000);
+  }
+  return Math.max(best, 1);
+}
+
+function assertLinearScaling(build, smallBytes) {
+  const smallMs = bestCpuMs(build(smallBytes));
+  const largeMs = bestCpuMs(build(smallBytes * 10));
+  assert.ok(
+    largeMs < smallMs * 40,
+    `expected linear scaling (10x input, ~10x time), got ${(largeMs / smallMs).toFixed(1)}x (${smallMs.toFixed(1)}ms -> ${largeMs.toFixed(1)}ms)`
+  );
+}
+
+test("renderResumeText parses a paragraph with many inline constructs in linear time", () => {
   const unit =
     "Built **cross-region** payments *fast* using `redis` and a [status page](https://example.com/status) to track it. ";
-  const repeats = Math.ceil((256 * 1024) / unit.length);
-  const md = unit.repeat(repeats);
-  assert.ok(md.length >= 256 * 1024);
+  const build = (bytes) => unit.repeat(Math.ceil(bytes / unit.length));
 
-  const start = Date.now();
-  const text = renderResumeText(md);
-  const elapsedMs = Date.now() - start;
-
+  const text = renderResumeText(build(256 * 1024));
   assert.doesNotMatch(
     text,
     /\*\*|`|\[|\]/,
     "every inline construct resolves; none leaks its markdown syntax"
   );
   assert.match(text, /status page \(https:\/\/example\.com\/status\)/);
-  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+  assertLinearScaling(build, 32 * 1024);
 });
 
 // ---------------------------------------------------------------------------
@@ -402,44 +422,40 @@ test("renderResumeText parses a paragraph with many inline constructs, at scale,
 // ever close, and where" as an O(1) lookup instead.
 // ---------------------------------------------------------------------------
 
-test("renderResumeText resolves a malformed-link paragraph with unterminated destinations, at scale, well under a second", () => {
+test("renderResumeText resolves a malformed-link paragraph with unterminated destinations in linear time", () => {
   // Every unit opens a real "[label](" but the destination never closes —
-  // there is no ")" anywhere in the whole 256 KB paragraph — so a naive
+  // there is no ")" anywhere in the whole paragraph — so a naive
   // rescan-to-EOF on each one would be quadratic.
   const unit =
     "Built cross-region payments and cited a broken reference [see docs](internal link that never closes for detail. ";
-  const repeats = Math.ceil((256 * 1024) / unit.length);
-  const md = unit.repeat(repeats);
+  const build = (bytes) => unit.repeat(Math.ceil(bytes / unit.length));
+  const md = build(256 * 1024);
   assert.ok(md.length >= 256 * 1024);
   assert.equal(md.includes(")"), false, "the destination must never close in this fixture");
 
-  const start = Date.now();
   const text = renderResumeText(md);
-  const elapsedMs = Date.now() - start;
 
   assert.ok(
     text.includes("[see docs](internal"),
     "an unresolved link with no closing paren stays literal text"
   );
-  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+  assertLinearScaling(build, 32 * 1024);
 });
 
-test("renderResumeText resolves many unterminated links in one paragraph, at scale, well under a second", () => {
+test("renderResumeText resolves many unterminated links in one paragraph in linear time", () => {
   // A dense run of minimal "[a](b" fragments with no closing paren at all —
   // pure volume of never-closing destinations, rather than realistic prose,
   // stressing the same rescan-to-EOF path from a different angle.
   const unit = "[a](b ";
-  const repeats = Math.ceil((256 * 1024) / unit.length);
-  const md = unit.repeat(repeats);
+  const build = (bytes) => unit.repeat(Math.ceil(bytes / unit.length));
+  const md = build(256 * 1024);
   assert.ok(md.length >= 256 * 1024);
   assert.equal(md.includes(")"), false, "the destination must never close in this fixture");
 
-  const start = Date.now();
   const text = renderResumeText(md);
-  const elapsedMs = Date.now() - start;
 
   assert.ok(text.includes("[a](b"), "an unresolved link with no closing paren stays literal text");
-  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+  assertLinearScaling(build, 32 * 1024);
 });
 
 // ---------------------------------------------------------------------------
@@ -451,10 +467,10 @@ test("renderResumeText resolves many unterminated links in one paragraph, at sca
 // matter once a "[" is present. There's no exported hook into that
 // allocation, so this asserts the observable effect: a large delimiter-free
 // paragraph parses in low single-digit milliseconds, an order of magnitude
-// under the 256 KB delimiter-heavy scaling tests' own 500ms budget above.
+// under the delimiter-heavy scaling tests above.
 // ---------------------------------------------------------------------------
 
-test("renderResumeText's delimiter-free fast path parses a 1.5 MiB paragraph in well under 200ms", () => {
+test("renderResumeText's delimiter-free fast path parses a 1.5 MiB paragraph in linear time", () => {
   const unit =
     "Built cross region payments using redis and a status page to track it and shipped multiple releases without regressions across the whole quarter. ";
   assert.doesNotMatch(
@@ -462,18 +478,11 @@ test("renderResumeText's delimiter-free fast path parses a 1.5 MiB paragraph in 
     /[*_`[\]()]/,
     "fixture must contain none of parseRuns' delimiter characters"
   );
+  const build = (bytes) => unit.repeat(Math.ceil(bytes / unit.length));
   const target = 1.5 * 1024 * 1024;
-  const repeats = Math.ceil(target / unit.length);
-  const md = unit.repeat(repeats);
+  const md = build(target);
   assert.ok(md.length >= target);
 
-  const start = Date.now();
-  const text = renderResumeText(md);
-  const elapsedMs = Date.now() - start;
-
-  assert.ok(text.includes("Built cross region payments"));
-  assert.ok(
-    elapsedMs < 200,
-    `expected the delimiter-free fast path to finish well under 200ms, took ${elapsedMs}ms`
-  );
+  assert.ok(renderResumeText(md).includes("Built cross region payments"));
+  assertLinearScaling(build, 150 * 1024);
 });

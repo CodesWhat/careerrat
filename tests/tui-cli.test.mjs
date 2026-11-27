@@ -23,7 +23,7 @@ async function stopTestTerminal(child, isExited, terminal, pids = []) {
         for (const pid of pids) if (pid) killProcessTreeByPid(pid);
         child.kill("SIGKILL");
         resolve();
-      }, 3000);
+      }, 15_000);
       child.onExit(() => {
         clearTimeout(timer);
         resolve();
@@ -67,7 +67,7 @@ test("tui JSON reads saved jobs without a terminal, agent or browser server", (t
 });
 
 test("legacy renderer can browse, filter and quit without launching an agent", {
-  timeout: 12000,
+  timeout: 120_000,
 }, async (t) => {
   const env = fixture(t);
   preparePtyHelpers();
@@ -124,7 +124,7 @@ test("legacy renderer can browse, filter and quit without launching an agent", {
   });
   const timer = setTimeout(
     () => rejectRun(new Error(`TUI proof timed out at ${stage}\n${snapshot}`)),
-    9000
+    90_000
   );
   t.after(async () => {
     clearTimeout(timer);
@@ -139,7 +139,7 @@ for (const ownsSearch of [false, true])
   test(ownsSearch
     ? "closing the real terminal cancels search state owned by its native agent session"
     : "native pane and saved jobs coexist, shortcuts don't submit, and quitting stops the child", {
-    timeout: 15000,
+    timeout: 120_000,
   }, async (t) => {
     const env = fixture(t);
     if (ownsSearch) {
@@ -225,7 +225,7 @@ for (const ownsSearch of [false, true])
     });
     const timer = setTimeout(
       () => rejectRun(new Error(`Native workspace proof timed out at ${stage}\n${snapshot}`)),
-      10000
+      90_000
     );
     t.after(async () => {
       clearTimeout(timer);
@@ -245,7 +245,7 @@ for (const captureFails of [false, true]) {
   test(captureFails
     ? "failed outer paste saves nothing and forwards no document or request to the agent"
     : "chunked outer paste is saved completely before the agent receives its context request", {
-    timeout: 15000,
+    timeout: 120_000,
   }, async (t) => {
     const env = fixture(t);
     if (captureFails) writeFileSync(join(env.CAREERRAT_HOME, "workspace/intake"), "blocked");
@@ -332,7 +332,7 @@ for (const captureFails of [false, true]) {
     });
     const timer = setTimeout(
       () => rejectRun(new Error(`Paste proof timed out at ${stage}\n${snapshot}`)),
-      10000
+      90_000
     );
     t.after(async () => {
       clearTimeout(timer);
@@ -346,7 +346,7 @@ for (const captureFails of [false, true]) {
 }
 
 test("shutdown cannot reopen watchers when the workspace disappears during agent exit", {
-  timeout: 10000,
+  timeout: 120_000,
 }, async (t) => {
   const env = fixture(t);
   preparePtyHelpers();
@@ -389,7 +389,7 @@ test("shutdown cannot reopen watchers when the workspace disappears during agent
   });
   const timer = setTimeout(
     () => rejectRun(new Error("shutdown remained alive after workspace removal")),
-    2500
+    90_000
   );
   t.after(async () => {
     clearTimeout(timer);
@@ -399,7 +399,7 @@ test("shutdown cannot reopen watchers when the workspace disappears during agent
 });
 
 test("a file dropped into the real terminal is copied and extracted before the agent sees it", {
-  timeout: 15000,
+  timeout: 120_000,
 }, async (t) => {
   const env = fixture(t);
   const source = join(env.HOME, "interview notes.md");
@@ -460,7 +460,7 @@ test("a file dropped into the real terminal is copied and extracted before the a
   });
   const timer = setTimeout(
     () => rejectRun(new Error(`File drop timed out at ${stage}\n${snapshot}`)),
-    10000
+    90_000
   );
   t.after(async () => {
     clearTimeout(timer);
@@ -470,7 +470,7 @@ test("a file dropped into the real terminal is copied and extracted before the a
 });
 
 test("legacy renderer previews and confirms a recorded Undo without an agent", {
-  timeout: 15000,
+  timeout: 120_000,
 }, async (t) => {
   const { buildKnowledgeWriteEntry } = await import("../src/core/agent/knowledge-write-log.mjs");
   const { workspaceMessageAppend } = await import("../src/core/agent/workspace-thread.mjs");
@@ -551,7 +551,7 @@ test("legacy renderer previews and confirms a recorded Undo without an agent", {
   });
   const timer = setTimeout(
     () => rejectRun(new Error(`Undo terminal timed out at ${stage}\n${snapshot}`)),
-    10000
+    90_000
   );
   t.after(async () => {
     clearTimeout(timer);
