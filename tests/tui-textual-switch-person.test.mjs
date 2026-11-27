@@ -263,3 +263,64 @@ test("the agent's launch arguments are worked out for each person on every start
   await session.dispatch({ op: "resize", cols: 200, rows: 10 });
   await until(() => screen(events).includes("ARGS[base]"));
 });
+
+// --- Codex pass-2 findings ---
+
+test("a context save drafted before a switch is rejected, not saved to the new person", async (t) => {
+  const { events, session } = await fixture(t);
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  const person = events.filter((e) => e.type === "person").at(-1);
+  await session.dispatch({
+    op: "capture",
+    id: 1,
+    text: "a JD for the owner",
+    generation: person.generation - 1,
+  });
+  assert.match(events.at(-1).message, /previous workspace/);
+  assert.equal(
+    events.some((e) => e.type === "context"),
+    false
+  );
+});
+
+test("closing after a switch leaves a connection another session still shares", async (t) => {
+  const { base, session } = await fixture(t);
+  t.after(() => closeAll());
+  const env = { ...process.env, CAREERRAT_HOME: base };
+  for (const key of ["CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"]) delete env[key];
+  const other = await createTextualSession({ repoRoot: root, env, agent: null, emit: () => {} });
+  t.after(() => other.close());
+  const db = openDb({ repoRoot: root, env });
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  assert.doesNotThrow(() => db.prepare("SELECT 1").get(), "the other session's handle stays open");
+});
+
+test("a change written to the destination during teardown is in the handoff snapshot", async (t) => {
+  const { base, events, session } = await fixture(t);
+  const switching = session.dispatch({ op: "switch-person", person: "ada" });
+  writeTracker(join(base, "people/ada"), [app("ada-job", "AdaCo"), app("ada-two", "AdaTwo")]);
+  await switching;
+  assert.deepEqual(ids(events).sort(), ["ada-job", "ada-two"]);
+});
+
+test("a destination that fails while the workspace state is built is refused and unlocks", async (t) => {
+  const { base, events, session } = await fixture(t);
+  writeFileSync(
+    join(base, "people/ada/workspace/tracker.json"),
+    JSON.stringify({
+      meta: { version: 7 },
+      applications: [
+        { id: "bad", company: { toString: null }, role: "Engineer", status: "applied" },
+        app("fine", "FineCo"),
+      ],
+    })
+  );
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  assert.ok(events.some((e) => e.type === "switch-end"));
+  assert.match(events.filter((e) => e.type === "notice").at(-1).message, /Can't switch/);
+  assert.equal(
+    events.some((e) => e.type === "person"),
+    false
+  );
+  assert.deepEqual(ids(events), ["owner-job"]);
+});

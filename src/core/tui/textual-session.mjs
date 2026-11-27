@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeDb } from "../db/connection.mjs";
+import { closeDb, retainDb } from "../db/connection.mjs";
 import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { currentPerson, peopleBase, resolvePersonSelection } from "../paths/people.mjs";
@@ -52,6 +52,7 @@ export async function createTextualSession({
   // Bumped on every person switch so a stopped pane's late events are dropped.
   let generation = 0;
   let switching = false;
+  retainDb(ctx);
   let releaseHolder = registerDbHolder(ctx, "tui");
   let lastSnapshot = "";
   let framed = null;
@@ -195,17 +196,19 @@ export async function createTextualSession({
     let nextEnv;
     let nextCtx;
     let nextData;
+    let nextState;
     try {
       nextEnv = personContext(name);
       nextCtx = { repoRoot, env: nextEnv };
       nextData = readJobs(nextCtx);
+      nextState = createWorkspaceState(nextData);
     } catch (error) {
       send({ type: "switch-end" });
       send({ type: "notice", message: `Can't switch: ${error.message}` });
       return;
     }
-    const nextState = createWorkspaceState(nextData);
     const nextHolder = registerDbHolder(nextCtx, "tui");
+    retainDb(nextCtx);
     switching = true;
     generation += 1;
     clearTimeout(drawing);
@@ -234,17 +237,27 @@ export async function createTextualSession({
     }
     if (closing) {
       nextHolder();
+      closeDb(nextCtx);
       return;
     }
     env = nextEnv;
     ctx = nextCtx;
     releaseHolder = nextHolder;
-    data = nextData;
-    state = nextState;
+    // The watcher's baseline comes before the final read, so a write during
+    // teardown is either in this read or reported by the watcher. If the fresh
+    // read can't be used, the preflight one stands.
+    startWatcher();
+    try {
+      const freshData = readJobs(ctx);
+      state = createWorkspaceState(freshData);
+      data = freshData;
+    } catch {
+      data = nextData;
+      state = nextState;
+    }
     lastSnapshot = "";
     send(personEvent());
     snapshot();
-    startWatcher();
     send({
       type: "notice",
       message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
@@ -533,6 +546,7 @@ export async function createTextualSession({
           await stopTerminalSessionSearches({ ...ctx, sessionId });
         } finally {
           releaseHolder();
+          closeDb(ctx);
         }
       }
     })();

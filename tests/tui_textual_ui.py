@@ -195,6 +195,58 @@ closeAll();
         await app.send({"op": "refresh"})
         self.assertEqual(written[-1], {"op": "refresh", "generation": 3})
 
+    async def test_context_drafts_are_blocked_in_a_switch_and_bound_to_their_workspace(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        pushed = []
+        app.push_screen = lambda screen, *a, **k: pushed.append(screen)
+        app.switching = True
+        app.action_add_context()
+        app.open_context(prefill="pasted JD")
+        self.assertEqual(pushed, [], "no draft opens while a switch is in flight")
+        app.switching = False
+        app.generation = 2
+        app.action_add_context()
+        self.assertEqual(pushed[0].generation, 2)
+
+        written = []
+
+        class Stdin:
+            def write(self, data):
+                written.append(json.loads(data))
+
+            async def drain(self):
+                pass
+
+        app.proc = SimpleNamespace(returncode=None, stdin=Stdin())
+        # A draft keeps the generation that opened it, even if the app moved on.
+        await app.send({"op": "capture", "id": 1, "text": "x", "generation": 2})
+        app.generation = 3
+        await app.send({"op": "capture", "id": 2, "text": "y", "generation": 2})
+        self.assertEqual([m["generation"] for m in written], [2, 2])
+
+        # Saving a draft from the old workspace is refused before anything is sent.
+        failures = []
+        written.clear()
+        await MODULE.ContextCapture.action_save(
+            SimpleNamespace(waiting=False, app=app, generation=2, fail=failures.append)
+        )
+        self.assertEqual(written, [])
+        self.assertEqual(len(failures), 1)
+
+    async def test_the_switch_lock_holds_until_the_destination_snapshot_lands(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        calls = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: calls.append(("person", person))
+        app.update_workspace = lambda value: calls.append(("workspace", value))
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        self.assertTrue(app.switching, "still locked after the person event")
+        self.assertFalse(app.check_action("add_context", ()))
+        await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        self.assertFalse(app.switching)
+        self.assertEqual([c[0] for c in calls], ["person", "workspace"])
+
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
     )

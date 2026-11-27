@@ -23,6 +23,7 @@ const DB_REL_PATH = "db/careerrat.db";
 // different data roots across tests; the cache must key on the thing that
 // actually determines the db file.
 const _connections = new Map();
+const _retains = new Map();
 
 export function dbFilePath({ repoRoot, env } = {}) {
   return dataPath({ repoRoot, env }, DB_REL_PATH);
@@ -79,6 +80,7 @@ export function openDb({ repoRoot, env } = {}) {
 // `openDb()` call re-opens the file (and re-runs any pending migrations)
 // instead of handing back a stale handle from a previous test's temp dir.
 export function closeAll() {
+  _retains.clear();
   for (const db of _connections.values()) {
     try {
       db.close();
@@ -89,10 +91,24 @@ export function closeAll() {
   _connections.clear();
 }
 
-// Close and forget the cached connection for one data root, so nothing keeps the
-// file open once its workspace is no longer in use.
+// A long-lived owner of a data root (a TUI session) retains it, so another
+// owner's closeDb can't close the handle out from under it: the real close
+// waits until the last retainer lets go.
+export function retainDb({ repoRoot, env } = {}) {
+  const key = privateDataRoot({ repoRoot, env });
+  _retains.set(key, (_retains.get(key) ?? 0) + 1);
+}
+
+// Release one retain and, once nobody else holds the root, close and forget the
+// cached connection so nothing keeps the file open after its workspace is done.
 export function closeDb({ repoRoot, env } = {}) {
   const key = privateDataRoot({ repoRoot, env });
+  const held = _retains.get(key) ?? 0;
+  if (held > 1) {
+    _retains.set(key, held - 1);
+    return;
+  }
+  _retains.delete(key);
   const db = _connections.get(key);
   if (!db) return;
   _connections.delete(key);

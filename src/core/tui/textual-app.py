@@ -735,9 +735,11 @@ class ContextCapture(ModalScreen):
     #capture-buttons { height: 1; }
     """
 
-    def __init__(self, prefill=""):
+    def __init__(self, prefill="", generation=0):
         super().__init__()
         self.prefill = prefill
+        # The workspace this draft was opened on; it can only be saved there.
+        self.generation = generation
         self.files = []
         self.waiting = False
         self.request_id = None
@@ -766,7 +768,12 @@ class ContextCapture(ModalScreen):
         self.set_waiting(True)
         self.request_id = self.app.next_request_id()
         await self.app.send(
-            {"op": "inspect", "id": self.request_id, "text": self.prefill}
+            {
+                "op": "inspect",
+                "id": self.request_id,
+                "text": self.prefill,
+                "generation": self.generation,
+            }
         )
 
     def set_waiting(self, waiting):
@@ -811,6 +818,9 @@ class ContextCapture(ModalScreen):
     async def action_save(self):
         if self.waiting:
             return
+        if self.app.switching or self.generation != self.app.generation:
+            self.fail("The workspace changed since this was opened. Close this and add it again.")
+            return
         value = self.query_one(TextArea).text
         if self.files:
             message = {"files": [item["path"] for item in self.files]}
@@ -821,7 +831,14 @@ class ContextCapture(ModalScreen):
         self.request_id = self.app.next_request_id()
         self.query_one("#capture-error", Static).update("")
         self.set_waiting(True)
-        await self.app.send({"op": "capture", "id": self.request_id, **message})
+        await self.app.send(
+            {
+                "op": "capture",
+                "id": self.request_id,
+                **message,
+                "generation": self.generation,
+            }
+        )
 
     async def on_button_pressed(self, event):
         event.stop()
@@ -1039,6 +1056,7 @@ class CareerRatApp(App):
         # request queued for one person is never run against another.
         self.generation = 0
         self.switching = False
+        self.awaiting_snapshot = False
         self.proc = None
         self.reader = None
         self.stderr_reader = None
@@ -1266,7 +1284,7 @@ class CareerRatApp(App):
         if len(self.screen_stack) > 1 or not event.text.strip():
             return
         event.stop()
-        self.push_screen(ContextCapture(prefill=event.text))
+        self.open_context(prefill=event.text)
 
     async def send(self, message):
         # While a switch is open, nothing but the switch itself (and the pane
@@ -1274,7 +1292,7 @@ class CareerRatApp(App):
         # one isn't ready.
         if self.switching and message.get("op") not in ("switch-person", "resize", "quit"):
             return
-        message = {**message, "generation": self.generation}
+        message = {"generation": self.generation, **message}
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.stdin.write((json.dumps(message) + "\n").encode())
@@ -1403,17 +1421,23 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
+            if self.awaiting_snapshot:
+                self.awaiting_snapshot = False
+                self.switching = False
         elif kind == "people":
             self.push_screen(
                 PersonPicker(value["people"], value.get("current")),
                 lambda choice: self.pick_person(value.get("current"), choice),
             )
         elif kind == "person":
+            # Still locked: the switch ends when the destination's snapshot lands.
             self.generation = value.get("generation", self.generation)
-            self.switching = False
+            self.switching = True
+            self.awaiting_snapshot = True
             self.open_person(value.get("person"))
         elif kind == "switch-end":
             self.switching = False
+            self.awaiting_snapshot = False
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
@@ -1955,7 +1979,7 @@ class CareerRatApp(App):
         elif name == "search":
             await self.send({"op": "search-start"})
         elif name == "context":
-            self.push_screen(ContextCapture())
+            self.open_context()
         elif name == "open-jd" and self.selected_id:
             await self.send({"op": "document", "id": self.selected_id})
         elif name == "refresh":
@@ -2009,8 +2033,15 @@ class CareerRatApp(App):
         else:
             await self.send({"op": "request", "action": name})
 
+    def open_context(self, prefill=""):
+        # No draft opens while a switch is in flight: it would be bound to a
+        # workspace that is closing.
+        if self.switching:
+            return
+        self.push_screen(ContextCapture(prefill=prefill, generation=self.generation))
+
     def action_add_context(self):
-        self.push_screen(ContextCapture())
+        self.open_context()
 
     def pick_person(self, current, choice):
         # None is Escape or Cancel. The owner's own workspace is "".
