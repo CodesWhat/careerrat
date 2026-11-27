@@ -65,3 +65,36 @@ test("publish.yml smokes the packed install after the install and before npm pub
   assert.ok(installAt !== -1 && installAt < smokeAt, "the smoke must run after npm ci");
   assert.ok(smokeAt < publishAt, "the smoke must run before npm publish");
 });
+
+test("npmCommand on Windows without npm_execpath drives npm-cli.js next to node, never cmd.exe", () => {
+  const execPath = "C:\\Program Files\\nodejs\\node.exe";
+  const cli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
+  const command = npmCommand(["install", "C:\\Users\\a b\\Temp\\x y.tgz"], {
+    env: {},
+    execPath,
+    platform: "win32",
+    exists: (p) => p === cli,
+  });
+  assert.deepEqual(command, {
+    file: execPath,
+    args: [cli, "install", "C:\\Users\\a b\\Temp\\x y.tgz"],
+    shell: false,
+  });
+});
+
+test("npmCommand quotes cmd.exe arguments when it must fall back to npm.cmd", () => {
+  const command = npmCommand(["install", "--prefix", "C:\\Users\\a b\\Temp dir", 'say "hi"'], {
+    env: {},
+    execPath: "C:\\node\\node.exe",
+    platform: "win32",
+    exists: () => false,
+  });
+  assert.equal(command.file, "npm.cmd");
+  assert.equal(command.shell, true);
+  assert.deepEqual(command.args, [
+    "install",
+    "--prefix",
+    '"C:\\Users\\a b\\Temp dir"',
+    '"say ""hi"""',
+  ]);
+});

@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { win32 } from "node:path";
+
 function npmInvocation(args, options = {}) {
   const env = options.env || process.env;
   const execPath = options.execPath || process.execPath;
@@ -23,6 +26,21 @@ export function npmCommand(args, options = {}) {
     const { file, args: nodeArgs } = npmInvocation(args, options);
     return { file, args: nodeArgs, shell: false };
   }
-  if (platform === "win32") return { file: "npm.cmd", args, shell: true };
+  if (platform === "win32") {
+    // Prefer the npm CLI that ships next to node.exe: no cmd.exe, so no quoting.
+    const exists = options.exists || existsSync;
+    const execPath = options.execPath || process.execPath;
+    const cli = win32.join(win32.dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js");
+    if (exists(cli)) return { file: execPath, args: [cli, ...args], shell: false };
+    return { file: "npm.cmd", args: args.map(quoteForCmd), shell: true };
+  }
   return { file: "npm", args, shell: false };
+}
+
+// cmd.exe splits unquoted arguments on spaces, so a temp path like
+// "C:\Users\a b\Temp" breaks. Wrap anything with whitespace or cmd
+// metacharacters in double quotes and double any embedded quotes.
+function quoteForCmd(arg) {
+  if (arg !== "" && !/[\s"&|<>^()%!,;=]/.test(arg)) return arg;
+  return `"${arg.replaceAll('"', '""')}"`;
 }
