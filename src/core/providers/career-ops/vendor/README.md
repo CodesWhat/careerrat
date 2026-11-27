@@ -10,9 +10,8 @@ Rolled forward 2026-11-27 (CR70 slice 0, foundation only) from
 `8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40`. This roll moves the pin and adds
 the shared plumbing the 70 new upstream providers need; it adopts no provider.
 Every provider file in this directory is still the pre-roll copy, and the 70
-new ids sat in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
-until their slice landed (see `.planning/cr70-slices.md`). No id carries that
-wording any more; the final slice (below) settled the last three. Comments stay
+new ids sit in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
+until their slice lands (see `.planning/cr70-slices.md`). Comments stay
 verbatim from upstream; only message strings we emit are re-punctuated.
 
 - New helpers copied verbatim: `_cached-lookup`, `_city-slug`, `_country`,
@@ -45,8 +44,9 @@ verbatim from upstream; only message strings we emit are re-punctuated.
   `fetchDetail`/`descriptionPartial` typedefs carried forward.
   `_profile-keywords.mjs` is unchanged: upstream's diff only touches the
   `config/profile.yml` fallback this compatibility module deliberately omits.
-- Not touched: `_trust-validator` (nothing we adopt imports it).
-  `robots-check.mjs` was adopted by the final slice, see below.
+- Not touched: `robots-check.mjs` (only upstream's `sitemap` provider uses it,
+  and it pulls in `_ip-guard`; decide it with slice 18), `_trust-validator`
+  (nothing we adopt imports it).
 
 CR70 slice 1 (2026-11-27) re-vendored verbatim from `13786939`: a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature. Notable upstream changes: amazon reads multi-city locations and sizes its page budget from reported hits, a16z-speedrun-talent gained filters and job details, arbeitsagentur reports partial boards, avature reads per-country pages. Message strings we emit are re-punctuated; comments stay verbatim.
 
@@ -81,36 +81,6 @@ CR70 slice 15 (2026-11-27) newly adopted from `13786939`: pracecz, platsbanken, 
 CR70 slice 16 (2026-11-27) newly adopted from `13786939`: adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit. The applicantpro, eploy and zoho-recruit fixtures read their sample pages from `tests/fixtures/career-ops/` (copied from upstream, MIT). Message strings we emit are re-punctuated; comments stay verbatim.
 
 CR70 slice 17 (2026-11-27) newly adopted from `13786939`: gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager. successfactors was re-vendored verbatim here (it was held back in slice 6 because the new upstream file imports successfactors-classic) and its fixture regenerated. The peoplesoft fixture reads its sample pages from `tests/fixtures/career-ops/` and drives the real `createContext()` transport instead of upstream's `makeHttpCtx()`; for that, `fetchResponse` in `career-ops-registry.mjs` now hands a raw 3xx back when a provider asks for `redirect: 'manual'` (guardedFetch already declined to follow it), which peoplesoft's same-origin redirect walk needs. The gupy fixture drops its `config/profile.yml` fallback case, the successfactors, successfactors-classic and taleez fixtures drop their `scan.mjs` cases, and the talentlink fixture is a node:test suite. Message strings we emit are re-punctuated; comments stay verbatim.
-
-CR70 final slice (2026-11-27) settled the last three upstream ids from `13786939`:
-
-- `sitemap.mjs` adopted. It is a config-driven employer sitemap reader (explicit
-  `provider: sitemap` entries only) and needs `../robots-check.mjs`, vendored as
-  `src/core/providers/career-ops/robots-check.mjs` (sibling of `lib/`, matching
-  upstream's `providers/../robots-check.mjs` import). Every sitemap, child
-  sitemap and detail URL is checked against the site's robots.txt before it is
-  fetched, and a robots.txt that cannot be read denies. CareerRat changes to
-  `robots-check.mjs`: it sends CareerRat's own User-Agent and obeys the
-  `careerrat` robots group (upstream's is `career-ops`), screens addresses with
-  `isNonPublicIp` from `src/core/net/public-http-fetch.mjs` (now exported;
-  upstream's `_ip-guard` is not vendored), and its default transport is
-  `guardedFetch` with `redirect: 'manual'` and a 500 KiB cap instead of
-  upstream's `fetchResponse`. `sitemap.mjs` passes the scan's `ctx.fetchResponse`
-  through `transportFromContext`, so robots.txt requests share the same guarded
-  context and the same size limits as the sitemap fetches. Its fixture and
-  `tests/career-ops-robots-check.test.mjs` (the RFC 9309 matcher, fail-closed
-  and egress cases) are adapted from upstream's `sitemap` and `robots-check`
-  suites.
-- `wellfound.mjs` NOT adopted. Upstream scrapes server-rendered Wellfound pages
-  that robots.txt partly disallows. CareerRat's native `src/core/providers/wellfound.mjs`
-  (a search-URL builder used by `source-url.mjs` and `search-sources.mjs`) stays
-  the only Wellfound path.
-- `telegram-channel.mjs` NOT adopted. Per-post employer attribution is
-  heuristic (see the earlier note).
-
-Both non-adopted ids stay in `CAREER_OPS_DEFERRED_PROVIDER_IDS`, now with their
-reasons instead of a slice marker. `local-parser` stays excluded; upstream's
-rewrite of it (+175/-41) is noted here and not taken.
 
 CR70 leftovers (2026-11-27) re-vendored verbatim from `13786939`: teamtailor, workable and hackernews, the three held back for a dependency the shim lacked. `_http.mjs` gains `resolveDefaultTimeoutMs` (verbatim) and `fetchTextStream`, a standalone export like upstream's that calls `guardedFetch` instead of fetch: the private-address screen and DNS pinning apply, `redirect` defaults to `error`, `timeoutMs` bounds the whole transfer, and `maxBytes` (default 10 MiB) bounds the decoded body with `response_too_large`. `ats-vendor.mjs` is vendored verbatim at `career-ops/ats-vendor.mjs`, the path hackernews imports it from. The workable fixture drops the `scan.mjs` `buildLocationFilter` and dedup cases and keeps a direct board_slug check; teamtailor and hackernews fixtures are unchanged apart from the vendor path. Message strings we emit are re-punctuated; comments stay verbatim.
 

@@ -48,8 +48,6 @@ CR70 slice 16: new fixtures for adp-myjobs, adp-workforcenow, applicantpro, care
 
 CR70 slice 17: new fixtures for gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager (plus a regenerated successfactors fixture; the peoplesoft sample page says "Graduate degree" where upstream says a banned word, so the repo's inclusive-language test passes), adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
 
-CR70 final slice: new fixture for sitemap, adapted from upstream's `13786939` suite (`sitemap-employer-*.xml/html` fixtures copied alongside). robots.txt verdicts come from an injected gate, as upstream does. The adapter's robots-check module has its own plain node test, `tests/career-ops-robots-check.test.mjs`, adapted from upstream's `robots-check` suite with the `careerrat` product token. `wellfound` and `telegram-channel` were evaluated and not adopted (see the vendor README), so they have no fixture.
-
 CR70 leftovers: the fixtures for teamtailor, workable and hackernews were regenerated from upstream's `13786939` suites. workable drops the `scan.mjs` `buildLocationFilter` and dedup cases (`isOfferSeen`, `markOfferSeen`, `listingIdentityToken`) and keeps a direct board_slug check; `tests/career-ops-lib.test.mjs` covers the new `fetchTextStream` and `resolveDefaultTimeoutMs` shim exports and `ats-vendor.mjs`.
 
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
