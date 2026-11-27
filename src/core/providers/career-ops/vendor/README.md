@@ -10,8 +10,8 @@ Rolled forward 2026-11-27 (CR70 slice 0, foundation only) from
 `8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40`. This roll moves the pin and adds
 the shared plumbing the 70 new upstream providers need; it adopts no provider.
 Every provider file in this directory is still the pre-roll copy, and the 70
-new ids sit in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
-until their slice lands (see `.planning/cr70-slices.md`). Comments stay
+new ids sat in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
+until their slice landed (see `.planning/cr70-slices.md`). Comments stay
 verbatim from upstream; only message strings we emit are re-punctuated.
 
 - New helpers copied verbatim: `_cached-lookup`, `_city-slug`, `_country`,
@@ -236,3 +236,17 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
 - `teamtailor.mjs`: `isWholeChannel` checks for a self-closing or closed
   `<channel>` in one forward pass. Upstream's per-opener regex rescans the page
   from every unterminated `<channel` and goes quadratic.
+
+## End of the CR70 roll (2026-11-27)
+
+The roll is finished. Three upstream providers are not adopted and stay in
+`CAREER_OPS_DEFERRED_PROVIDER_IDS` with real reasons; no "pending" reasons
+remain.
+
+- `sitemap`: crawls arbitrary employer sites. Doing that safely needs robots,
+  redirect, DNS-deadline and parser-cost guarantees beyond the provider layer.
+  A hardened attempt still had five high-severity network-safety findings and
+  is archived at tag `archive/cr70-sitemap-adoption`. Do not build on it.
+- `wellfound`: its robots.txt disallows part of what the scraper reads. The
+  native URL builder stays.
+- `telegram-channel`: per-post employer attribution is heuristic.

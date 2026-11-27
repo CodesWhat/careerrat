@@ -346,15 +346,17 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
   "zoho-recruit",
 ]);
 
-// Upstream providers not yet adopted, pending Scott's decision. Not a
-// permanent exclusion; each can move into CAREER_OPS_PROVIDER_IDS later. The
-// prior deferred batch (jobbankca, mycareersfuture, senjob, yourator) was
+// Upstream providers CareerRat does not adopt. The CR70 provider roll is
+// finished; these three are the ones it left out, each for the reason given.
+// The prior deferred batch (jobbankca, mycareersfuture, senjob, yourator) was
 // adopted into CAREER_OPS_PROVIDER_IDS on 2026-08-23.
 export const CAREER_OPS_DEFERRED_PROVIDER_IDS = Object.freeze({
   "telegram-channel":
     "Scrapes Telegram channel web-preview pages with heuristic per-post employer attribution (upstream measured a 25% pass rate on its own RU/CIS test corpus, 0% on the EN one); too fragile and low-precision to adopt as a general source.",
-  sitemap: "CR70 slice 18 pending",
-  wellfound: "CR70 slice 19 pending",
+  sitemap:
+    "Crawls arbitrary employer sites. Doing that safely needs robots handling, redirect checks, DNS-deadline and parser-cost guarantees that go beyond what the provider layer offers.",
+  wellfound:
+    "Its robots.txt disallows part of what the scraper reads. The native Wellfound URL builder stays.",
 });
 
 // Upstream providers deliberately never adopted, with no plan to. Distinct

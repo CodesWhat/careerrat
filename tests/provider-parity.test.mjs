@@ -220,18 +220,16 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
   assert.equal(CAREER_OPS_UPSTREAM.providerCount, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length);
 });
 
-test("upstream providers not yet adopted are deferred with a CR70 slice marker", () => {
-  // Slice 0 of CR70 rolled the pin forward without adopting the 70 new
-  // providers. Each later slice moves its ids out of the deferred map, so a
-  // deferred id without a "CR70 slice N pending" reason (other than the
-  // long-standing telegram-channel deferral) means a slice lost track of it.
-  const adopted = new Set(CAREER_OPS_PROVIDER_IDS);
-  const pending = Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS).filter(
-    ([id]) => id !== "telegram-channel"
-  );
-  assert.equal(pending.length, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length - adopted.size - 1);
-  for (const [id, reason] of pending) {
-    assert.match(reason, /^CR70 slice \d+ pending$/, id);
+test("the not-adopted set is exactly sitemap, telegram-channel and wellfound, each with a real reason", () => {
+  assert.deepEqual(Object.keys(CAREER_OPS_DEFERRED_PROVIDER_IDS).sort(), [
+    "sitemap",
+    "telegram-channel",
+    "wellfound",
+  ]);
+  for (const [id, reason] of Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS)) {
+    assert.doesNotMatch(reason, /pending/i, id);
+    assert.doesNotMatch(reason, /CR70/, id);
+    assert.ok(reason.length > 40, id);
   }
 });
 

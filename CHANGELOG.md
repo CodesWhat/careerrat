@@ -4,6 +4,12 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The Career Ops provider roll is finished. Three upstream providers are not adopted: `sitemap` (it crawls arbitrary employer sites, which can't be done safely in the provider layer), `wellfound` (its robots.txt disallows part of what the scraper reads, so only the native URL builder stays) and `telegram-channel` (it guesses the employer for each post).
+
 ## [0.26.1] - 2026-11-27
 
 ### Fixed
