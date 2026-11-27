@@ -29,7 +29,7 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 ### Skill layer
 
-Skills are all 28 `SKILL.md` files under `.agents/skills/`. They make judgment calls:
+Skills are all 26 `SKILL.md` files under `.agents/skills/`. They make judgment calls:
 
 - what to ask during onboarding
 - whether a job passes the body-read gate
@@ -111,9 +111,7 @@ the package.
 ## Intent router
 
 `AGENTS.md` in the repo root is the canonical intent router. It maps user intent
-to 26 user-facing skills. `intake-extract` and `resume-extract` are backend-only
-helpers invoked by the Universal Intake and onboarding upload routes, not
-user-intent destinations. The agent reads the router first, then routes every
+to 26 user-facing skills. The agent reads the router first, then routes every
 paste or instruction through it. See
 [Agent Contract](/advanced/agent-contract) for the full routing table.
 

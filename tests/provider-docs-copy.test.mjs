@@ -128,13 +128,7 @@ test("published agent setup names the accepted Claude Code and Codex set", async
   assert.match(agentContract, /no CareerRat account\s+or hosted candidate database/i);
   assert.match(agentContract, /selected CLI uses its provider/i);
   assert.match(agentContract, /documented provider and privacy boundary/i);
-  for (const skill of [
-    "answer-question",
-    "coach-gaps",
-    "intake-extract",
-    "resume-extract",
-    "report-issue",
-  ]) {
+  for (const skill of ["answer-question", "coach-gaps", "report-issue"]) {
     assert.match(agentContract, new RegExp(`\\b${skill}\\b`));
   }
   assert.doesNotMatch(agentContract, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/i);

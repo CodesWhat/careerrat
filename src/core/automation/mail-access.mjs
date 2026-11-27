@@ -1,8 +1,8 @@
 import { mayRun } from "./consent.mjs";
 
-export const MAIL_ACCESS_CAPABILITY = "mail_access";
+const MAIL_ACCESS_CAPABILITY = "mail_access";
 const MAIL_ACCESS_PLATFORMS = ["gmail", "outlook", "webmail"];
-export const MAIL_ACCESS_INGEST_PLATFORMS = ["gmail", "outlook"];
+const MAIL_ACCESS_INGEST_PLATFORMS = ["gmail", "outlook"];
 
 const GMAIL_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
 const OUTLOOK_DOMAINS = new Set(["outlook.com", "hotmail.com", "live.com", "msn.com"]);

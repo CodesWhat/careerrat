@@ -3436,59 +3436,6 @@ test("Codex public-web invocation uses supported per-call search and MCP config"
   }
 });
 
-test("claude exact-read invocation approves only the uploaded file and isolated skill", () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Read only the supplied resume.\n");
-  let isolatedCwd;
-  try {
-    const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-    mkdirSync(uploadDir, { recursive: true });
-    const upload = join(uploadDir, "resume.pdf");
-    const sibling = join(uploadDir, "other.pdf");
-    writeFileSync(upload, "resume", "utf8");
-    writeFileSync(sibling, "private sibling", "utf8");
-    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
-
-    const invocation = buildInstalledRuntimeInvocation({
-      runtimeId: "claude",
-      executablePath: "/safe/claude",
-      repoRoot,
-      isolatedCwd,
-      approvedReadPaths: [upload],
-      tools: ["Read", "Skill"],
-      skill: "resume-extract",
-    });
-    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
-    assert.deepEqual(settings.sandbox.filesystem.denyRead, ["//**"]);
-    assert.deepEqual(
-      new Set(settings.sandbox.filesystem.allowRead),
-      new Set([realpathSync(upload), realpathSync(isolatedCwd)])
-    );
-    assert.equal(settings.sandbox.filesystem.allowRead.includes(sibling), false);
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "workspace")),
-      false
-    );
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "candidate")),
-      false
-    );
-    assert.equal(invocation.args.includes("--safe-mode"), false);
-    assert.ok(invocation.args.includes("--strict-mcp-config"));
-    assert.ok(invocation.args.includes("--no-chrome"));
-    const allowed = invocation.args[invocation.args.indexOf("--allowedTools") + 1];
-    assert.doesNotMatch(
-      allowed,
-      /(?:^|,)Read(?:,|$)/,
-      "Read must never be approved without a path"
-    );
-    assert.match(allowed, /Read\(\/\//);
-    assert.match(allowed, /Skill\(resume-extract\)/);
-  } finally {
-    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
 test("claude exact-read invocation fails closed for missing, outside, and symlink-aliased paths", () => {
   const repoRoot = tempRepoWithOneSkill("resume-extract");
   const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
@@ -3517,41 +3464,6 @@ test("claude exact-read invocation fails closed for missing, outside, and symlin
     }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("claude exact-read invocation resolves uploads from CAREERRAT_HOME in packaged layout", () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract");
-  const privateHome = tempRoot();
-  const uploadDir = join(privateHome, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  let isolatedCwd;
-  try {
-    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
-    const invocation = buildInstalledRuntimeInvocation({
-      runtimeId: "claude",
-      executablePath: "/safe/claude",
-      repoRoot,
-      env: { CAREERRAT_HOME: privateHome },
-      isolatedCwd,
-      approvedReadPaths: [upload],
-      tools: ["Read", "Skill"],
-      skill: "resume-extract",
-    });
-    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
-    assert.ok(settings.sandbox.filesystem.allowRead.includes(realpathSync(upload)));
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.some((path) =>
-        path.startsWith(join(repoRoot, "workspace"))
-      ),
-      false
-    );
-  } finally {
-    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(privateHome, { recursive: true, force: true });
   }
 });
 
@@ -5191,59 +5103,6 @@ process.stdin.on("end", () => {
   assert.equal(existsSync(capturedIsolatedCwd), false);
 });
 
-test("runInstalledRuntime (claude exact-read skill): isolates cwd and passes only one approved upload", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Trigger word PROBE.\n");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  const executablePath = join(repoRoot, "fake-claude-read");
-  writeFileSync(
-    executablePath,
-    `#!/usr/bin/env node
-process.stdin.resume();
-process.stdin.on("end", () => {
-  process.stdout.write(JSON.stringify({
-    type: "result",
-    subtype: "success",
-    result: "ignored",
-    structured_output: {
-      cwd: process.cwd(),
-      usedSafeMode: process.argv.includes("--safe-mode"),
-      usedSettingSources: process.argv.includes("--setting-sources"),
-      settings: JSON.parse(process.argv[process.argv.indexOf("--settings") + 1]),
-    },
-  }));
-});
-`,
-    "utf8"
-  );
-  chmodSync(executablePath, 0o755);
-  try {
-    const result = await runInstalledRuntime({
-      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
-      prompt: "run resume-extract",
-      skill: "resume-extract",
-      repoRoot,
-      cwd: repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      timeoutMs: 5000,
-      spawnSyncImpl: verifiedClaudeVersion,
-    });
-    const data = JSON.parse(result.text);
-    assert.notEqual(data.cwd, realpathSync(repoRoot));
-    assert.equal(data.usedSafeMode, false);
-    assert.equal(data.usedSettingSources, true);
-    assert.deepEqual(
-      new Set(data.settings.sandbox.filesystem.allowRead),
-      new Set([realpathSync(upload), data.cwd])
-    );
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
 test("runInstalledRuntime rejects broad Glob/Grep tools before spawning Claude", async () => {
   const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
   let spawned = false;
@@ -5432,83 +5291,6 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
     assert.match(allowed, /mcp__careerrat_scoped_tools__fetch/);
     assert.doesNotMatch(allowed, /WebFetch/);
     assert.equal(result.text, "ok");
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("runInstalledRuntime stages one approved upload for Codex exact-read work", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume evidence", "utf8");
-  const calls = [];
-  let writtenPrompt = "";
-  try {
-    const result = await runInstalledRuntime({
-      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex" }),
-      prompt: "extract this resume",
-      skill: "resume-extract",
-      repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      spawnImpl(command, args, options) {
-        const stagedUpload = join(options.cwd, "input", "resume.pdf");
-        calls.push({ command, args, options, stagedUpload, staged: existsSync(stagedUpload) });
-        const child = fakeInstalledChild();
-        child.stdin.end = (value) => {
-          writtenPrompt = String(value);
-          queueMicrotask(() => {
-            child.stdout.emit(
-              "data",
-              Buffer.from(
-                ndjson([
-                  {
-                    type: "item.completed",
-                    item: { type: "agent_message", text: "resume extracted" },
-                  },
-                  { type: "turn.completed" },
-                ])
-              )
-            );
-            child.emit("close", 0, null);
-          });
-        };
-        return child;
-      },
-    });
-    assert.equal(result.text, "resume extracted");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].staged, true);
-    assert.match(writtenPrompt, /read_staged_input/);
-    assert.doesNotMatch(writtenPrompt, /input[/\\]resume\.pdf/);
-    assert.equal(calls[0].args.includes("--sandbox"), true);
-    assert.equal(calls[0].args.includes("read-only"), true);
-    for (const feature of ["shell_tool", "unified_exec", "view_image"]) {
-      assert.ok(
-        calls[0].args.some(
-          (arg, index, args) => arg === "--disable" && args[index + 1] === feature
-        ),
-        `Codex exact read must not re-enable ${feature}`
-      );
-    }
-    const overrides = calls[0].args.flatMap((arg, index, args) =>
-      arg === "-c" ? [args[index + 1]] : []
-    );
-    assert.ok(
-      overrides.some((value) => value?.startsWith("mcp_servers.careerrat_scoped_tools.command=")),
-      "Codex exact read must use the scoped CareerRat MCP server"
-    );
-    assert.ok(
-      overrides.includes('mcp_servers.careerrat_scoped_tools.enabled_tools=["read_staged_input"]')
-    );
-    assert.equal(overrides.includes('web_search="live"'), false);
-    assert.equal(
-      overrides.some((value) => value?.includes("--allow-public-web")),
-      false
-    );
-    assert.equal(existsSync(calls[0].options.cwd), false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -5981,51 +5763,6 @@ test("runInstalledRuntimeStream gives Codex only the selected CareerRat skill wo
     assert.match(receivedPrompt, /CODEX_SKILL_SCOPE/);
   } finally {
     assert.equal(spawnedCwd ? existsSync(spawnedCwd) : null, false);
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("runInstalledRuntimeStream tells Codex to use its staged-read tool", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Marker: CODEX_READ_SCOPE.\n");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  let receivedPrompt = null;
-  try {
-    const result = await runInstalledRuntimeStream({
-      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
-      prompt: "extract this resume",
-      skill: "resume-extract",
-      repoRoot,
-      cwd: repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      spawnImpl() {
-        const child = fakeStreamingChild({
-          chunks: [
-            ndjson([
-              { type: "thread.started", thread_id: "thread-read" },
-              {
-                type: "item.completed",
-                item: { id: "message-1", type: "agent_message", text: "Read" },
-              },
-              { type: "turn.completed" },
-            ]),
-          ],
-        });
-        const end = child.stdin.end;
-        child.stdin.end = (value) => {
-          receivedPrompt = String(value || "");
-          end.call(child.stdin, value);
-        };
-        return child;
-      },
-    });
-    assert.equal(result.text, "Read");
-    assert.match(receivedPrompt, /CODEX_READ_SCOPE/);
-    assert.match(receivedPrompt, /read_staged_input/);
-  } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });

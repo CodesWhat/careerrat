@@ -72,10 +72,7 @@ const SCOPED_PUBLIC_WEB_ARG = "--allow-public-web";
 const SCOPED_READ_FILE_ARG = "--approved-read-file";
 const MAX_SCOPED_READ_BYTES = 20 * 1024 * 1024;
 const INSTALLED_RUNTIME_MODULE_PATH = fileURLToPath(import.meta.url);
-const EXACT_READ_ROOTS = Object.freeze({
-  "intake-extract": ["workspace", "intake", "uploads"],
-  "resume-extract": ["workspace", "intake", "resume-uploads"],
-});
+const EXACT_READ_ROOTS = Object.freeze({});
 
 const FULL_WORKFLOW_ACCEPTED_CAPABILITIES = Object.freeze({
   completion: true,
@@ -2826,7 +2823,7 @@ const ANSI_COLOR_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 
 // pick the right one instead of re-deriving a magic number:
 //   - ONE_SHOT_RUNTIME_TIMEOUT_MS (the default below): sized for bounded,
 //     single-turn calls with no live web research, e.g. evaluate-job,
-//     tailor-application, resume-extract, and every other call-ai.mjs /
+//     tailor-application, and every other call-ai.mjs /
 //     skill-runtime.mjs route. 120s comfortably covers one model completion.
 //   - CHAT_SESSION_RUNTIME_TIMEOUT_MS: opted into per-call by
 //     chat-runtime.mjs's runInstalledTurn for interactive chat-session turns

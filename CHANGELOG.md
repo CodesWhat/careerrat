@@ -45,6 +45,8 @@ All notable changes to CareerRat are documented here. This project follows
 - `docs/WINDOWS.md` is now a short "Windows: install from npm" page, and `docs/RELEASE.md` drops the retired Mac build and Homebrew cask sections.
 - The in-app agent engine (`workspace-agent.mjs`, its write logs and auto-apply helpers, the issue-report builder) is deleted along with the tests that only drove it. The `configure`, `report-issue`, `email-comms` and `calendar-sync` skills drop their "Ask workspace" sections, and `coach-gaps` no longer describes a workspace-intent path.
 - Discovery and deep-ingest code that only the browser product reached is deleted: the company proposal flow and public careers scanner, the deep-ingest repo and source scanners and proposal builders, the sourcing worker manager, the browser source capture, the adjacent-role coach and the paste-intake classifier, dispatcher and matcher. `config/paste-intake-routes.json` stays, since AGENTS.md parity still checks it.
+- The private-account browser flows (Apple Mail ingest, browser session, adapters and workflows, contact identity), workspace export, the interview dossier and its PDF, the one-off answer builder, the LinkedIn provider, the scheduling plan, the Orca apply executor and the pre-Textual TUI runtime are deleted. `interview/packet.mjs`, `automation/mail-access.mjs` and `coaching/plan.mjs` stay, since skills call them.
+- The `resume-extract` and `intake-extract` skills are retired with their schemas, runtime allowlist entries and exact-read roots. They were only ever started by the browser server, so the skill count is now 26 and no skill runs through the embedded runtime by default.
 
 ### Fixed
 

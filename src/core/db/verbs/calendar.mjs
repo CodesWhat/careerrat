@@ -17,7 +17,7 @@ const PROVIDERS = new Set([
   "google_calendar",
   "outlook_calendar",
 ]);
-export const WRITE_PROVIDERS = new Set([
+const WRITE_PROVIDERS = new Set([
   "apple_calendar",
   "google_calendar",
   "outlook_calendar",

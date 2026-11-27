@@ -13,7 +13,7 @@ import { titlesBelowTarget } from "./seniority.mjs";
 // is explicitly configured as a tech domain. An explicit NON-tech domain is
 // authoritative and is never overridden by title inference below. Only when
 // candidate.domain is absent or empty (resume extraction commonly leaves it
-// blank — see .agents/skills/resume-extract/SKILL.md) do we fall back to
+// blank) do we fall back to
 // inferTechFromTargeting(): a keyword heuristic over the candidate's OWN
 // configured targeting titles (never a hardcoded personal/tech default —
 // see the repo's domain-neutrality rule). Only when NEITHER an explicit

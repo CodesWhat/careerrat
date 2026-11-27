@@ -49,7 +49,6 @@ const FEATURE_BY_OPERATION_PREFIX = [
 
 const FEATURE_BY_SKILL = {
   assist: "onboarding.targeting-assist",
-  "resume-extract": "onboarding.resume-ingestion",
   "discover-companies": "company-discovery",
   "research-boards": "source-discovery",
   "setup-searches": "source-discovery",

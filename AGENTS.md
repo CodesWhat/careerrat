@@ -14,11 +14,6 @@ first.
 The agent is the runtime; the skills are the how-to. When in doubt about *how* to
 do something, open the owning skill and follow it — don't improvise the procedure.
 
-`intake-extract` and `resume-extract` are backend-only helpers invoked by the
-Universal Intake and onboarding upload routes. They are shipped skills, but they
-are not user-intent destinations; route the user's goal to the owning intake or
-onboarding flow instead of asking them to invoke an extraction helper.
-
 Teach as you go. When a skill, feature, or tracker concept first becomes relevant,
 explain it in a line or two so the user learns the system by using it — progressive
 disclosure, not a front-loaded manual.

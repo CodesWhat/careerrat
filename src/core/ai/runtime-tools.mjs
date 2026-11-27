@@ -46,7 +46,7 @@ export const INSTALLED_SKILL_CAPABILITIES = Object.freeze({
     "reevaluate-strategy",
     "tailor-application",
   ]),
-  exactRead: Object.freeze(["intake-extract", "resume-extract"]),
+  exactRead: Object.freeze([]),
   publicWeb: Object.freeze([
     "company-health",
     "discover-companies",

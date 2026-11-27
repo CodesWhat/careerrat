@@ -48,7 +48,7 @@ test("README lists every shipped skill exactly once", async () => {
     .map((entry) => entry.name)
     .sort();
 
-  assert.equal(skillIds.length, 28);
+  assert.equal(skillIds.length, 26);
   for (const skillId of skillIds) {
     const occurrences = readme.split(`\`${skillId}\``).length - 1;
     assert.equal(occurrences, 1, `${skillId} should appear exactly once`);

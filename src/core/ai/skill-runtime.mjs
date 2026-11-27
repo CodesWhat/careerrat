@@ -80,13 +80,12 @@ export function discoverSkillDirs(repoRoot) {
     .sort();
 }
 
-// The raw one-shot HTTP surface is intentionally limited to extraction. Every
+// No skill is on the raw one-shot surface by default. Every
 // workflow with app state, browser activity, or durable writes stays behind
 // its typed app-owned route. Internal dedicated pipelines may opt a skill into
 // runSkillStream with CAREERRAT_RUNTIME_SKILLS, but that does not advertise or
 // expose it through POST /api/skill/run.
-const DIRECT_SKILL_RUN_SKILLS = Object.freeze(["intake-extract", "resume-extract"]);
-const DEFAULT_RUNTIME_SKILLS = DIRECT_SKILL_RUN_SKILLS.join(",");
+const DEFAULT_RUNTIME_SKILLS = "";
 const AGENT_APPLICATION_DEFAULT_SKILLS = new Set([
   "answer-question",
   "apply-job",

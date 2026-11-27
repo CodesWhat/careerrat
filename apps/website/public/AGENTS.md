@@ -58,9 +58,9 @@ This file only gets you to the front door — don't improvise procedures it cove
 
 `answer-question` · `apply-job` · `calendar-sync` · `coach-gaps` · `company-health` ·
 `configure` · `discover-companies` · `email-comms` · `evaluate-job` · `ingest-mail` ·
-`ingest-messages` · `ingest-profile` · `intake-extract` · `interview-prep` ·
+`ingest-messages` · `ingest-profile` · `interview-prep` ·
 `optimize-linkedin` · `reevaluate-strategy` · `relationship-sourcing` · `report-issue` ·
-`research-boards` · `research-comp` · `research-company` · `resume-extract` ·
+`research-boards` · `research-comp` · `research-company` ·
 `schedule-meeting` · `search-jobs` · `setup-searches` · `sync-status` ·
 `tailor-application` · `track-outcomes`
 

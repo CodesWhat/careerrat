@@ -84,7 +84,7 @@ jobs:
   # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
   # not just the structure-guards subset. A handful of integration tests self-skip
   # via node's test-runner `skip:` option when ANTHROPIC_API_KEY isn't set (chat-runtime,
-  # intake-classify, intake-extract, resume-extract, skill-runtime); every other test
+  # skill-runtime); every other test
   # is deterministic and runs the same on ubuntu-latest as it does locally. This job's
   # name ("tests") is in the "Main branch protection" ruleset's required_status_checks,
   # so unlike web-build below, a red run here blocks the merge.
