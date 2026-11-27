@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   checkUrlLiveness,
   extractApplyControlsFromHtml,
+  htmlToText,
   isUnreachable,
 } from "../src/core/liveness/job-link-checker.mjs";
 
@@ -179,4 +180,35 @@ test("checkUrlLiveness: network failure keeps the underlying cause in the reason
   });
   assert.equal(result.code, "fetch_failed");
   assert.match(result.reason, /ENOTFOUND/);
+});
+
+test("htmlToText scales linearly with repeated unclosed openers", () => {
+  const time = (unit, n) => {
+    const html = unit.repeat(n);
+    const start = process.hrtime.bigint();
+    htmlToText(html);
+    return Number(process.hrtime.bigint() - start);
+  };
+  for (const unit of ["<script>x ", "<style>x ", "<a ", "</script x "]) {
+    time(unit, 2000); // warm up
+    let best = Infinity;
+    for (let i = 0; i < 3; i += 1) {
+      const small = Math.max(time(unit, 5000), 1e5);
+      const large = time(unit, 50000);
+      best = Math.min(best, large / small);
+    }
+    // Linear is about 10x; quadratic is about 100x.
+    assert.ok(best < 30, `${JSON.stringify(unit)} grew ${best.toFixed(1)}x for 10x input`);
+  }
+});
+
+test("htmlToText keeps its existing behavior", () => {
+  assert.equal(htmlToText("<p>Hello <b>world</b></p>"), "Hello world");
+  assert.equal(htmlToText("a<script>var x=1;</script>b<style>p{}</STYLE >c"), "a b c");
+  assert.equal(htmlToText("a<script>never closed b"), "a never closed b");
+  assert.equal(htmlToText("a <> b < c"), "a <> b < c");
+  assert.equal(htmlToText("x <a <b> y"), "x y");
+  assert.equal(htmlToText("<scripts>keep</scripts>"), "keep");
+  assert.equal(htmlToText("a<script>1</script x>b"), "a b");
+  assert.equal(htmlToText("no tags   here\n now"), "no tags here now");
 });

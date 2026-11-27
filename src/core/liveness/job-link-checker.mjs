@@ -5,13 +5,60 @@ import { APPLY_PATTERNS, classifyLiveness, primaryPostingText } from "./liveness
 
 const LIVENESS_MAX_BYTES = 1024 * 1024;
 
+const WORD_CHAR = /\w/;
+
+// One forward pass. Every search below only moves forward, and a search that
+// finds nothing is remembered, so repeated unclosed openers cost O(1) each.
+// Matches what the old chain of regexes produced: script and style blocks
+// that close are dropped, every other tag becomes a space, and a stray "<"
+// with no ">" after it stays as text.
 export function htmlToText(html = "") {
-  return String(html)
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const input = String(html);
+  const length = input.length;
+  const parts = [];
+  let nextGt = -2;
+  const gtFrom = (from) => {
+    if (nextGt === -1) return -1;
+    if (nextGt < from) nextGt = input.indexOf(">", from);
+    return nextGt;
+  };
+  const closers = { script: /<\/script[^>]*>/gi, style: /<\/style[^>]*>/gi };
+  const noCloserAfter = { script: Infinity, style: Infinity };
+  const closerFrom = (name, from) => {
+    if (from >= noCloserAfter[name]) return null;
+    const re = closers[name];
+    re.lastIndex = from;
+    const match = re.exec(input);
+    if (!match) noCloserAfter[name] = from;
+    return match;
+  };
+
+  let textStart = 0;
+  let i = input.indexOf("<");
+  while (i !== -1) {
+    const gt = gtFrom(i + 1);
+    if (gt === -1) break;
+    let end = -1;
+    const lead = input.slice(i, i + 7).toLowerCase();
+    const name = lead === "<script" ? "script" : lead.startsWith("<style") ? "style" : "";
+    if (name) {
+      const afterName = i + 1 + name.length;
+      if (!WORD_CHAR.test(input[afterName] ?? "")) {
+        const closer = closerFrom(name, gt + 1);
+        if (closer) end = closer.index + closer[0].length;
+      }
+    }
+    if (end === -1 && gt > i + 1) end = gt + 1;
+    if (end === -1) {
+      i = input.indexOf("<", i + 1);
+      continue;
+    }
+    parts.push(input.slice(textStart, i), " ");
+    textStart = end;
+    i = end < length ? input.indexOf("<", end) : -1;
+  }
+  parts.push(input.slice(textStart));
+  return parts.join("").replace(/\s+/g, " ").trim();
 }
 
 export function extractApplyControlsFromHtml(html = "") {
