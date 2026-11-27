@@ -532,7 +532,6 @@ export async function runSkillStream({
   // app-safe is the default.
   tools,
   toolProfile,
-  approvedReadPaths,
   outputSchema,
   timeoutMs,
   model,
@@ -644,7 +643,6 @@ export async function runSkillStream({
           ).trim() || undefined,
         effort: requestEffort || undefined,
         tools: installedRuntimeTools,
-        approvedReadPaths,
         outputSchema,
         timeoutMs,
       };
