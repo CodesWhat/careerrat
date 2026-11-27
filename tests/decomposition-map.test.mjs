@@ -22,11 +22,6 @@ function readRepoFile(relPath) {
 const decompositionText = readRepoFile(artifactPaths.decomposition);
 const discoverCompaniesText = readRepoFile(artifactPaths.discoverCompanies);
 const routingPolicyText = readRepoFile(artifactPaths.routingPolicy);
-const agentsText = readRepoFile("AGENTS.md");
-const architectureText = readRepoFile("docs/ARCHITECTURE.md");
-const webApiText = readRepoFile("apps/web/src/lib/api.js");
-const chatFirstApiText = readRepoFile("apps/web/src/chat-first/api.js");
-const discoveryRouteText = readRepoFile("src/cli/discovery-route.mjs");
 const decomposition = parseYaml(decompositionText);
 
 const requiredSkills = [
@@ -70,27 +65,12 @@ function assertContainsAll(text, needles, label) {
   }
 }
 
-function assertMatchesAll(text, patterns, label) {
-  const normalizedText = text.replace(/\s+/g, " ");
-  for (const pattern of patterns) {
-    assert.match(normalizedText, pattern, `${label} should match ${pattern}`);
-  }
-}
-
 function requiredSection(text, startHeading, endHeading) {
   const start = text.indexOf(startHeading);
   assert.notEqual(start, -1, `expected section ${startHeading}`);
   if (!endHeading) return text.slice(start);
   const end = endHeading ? text.indexOf(endHeading, start + startHeading.length) : -1;
   assert.notEqual(end, -1, `expected section ${endHeading} after ${startHeading}`);
-  return text.slice(start, end);
-}
-
-function requiredSlice(text, startNeedle, endNeedle, label) {
-  const start = text.indexOf(startNeedle);
-  assert.notEqual(start, -1, `expected start ${startNeedle} in ${label}`);
-  const end = text.indexOf(endNeedle, start + startNeedle.length);
-  assert.notEqual(end, -1, `expected end ${endNeedle} after ${startNeedle} in ${label}`);
   return text.slice(start, end);
 }
 
@@ -218,7 +198,7 @@ test("owner validation enforces planned owner type semantics", () => {
     assertRepoOwnerPath("planned:src/core/future.mjs", "future module", "planned_ts_module")
   );
   assert.doesNotThrow(() =>
-    assertRepoOwnerPath("planned:src/cli/future-route.mjs", "future route", "api_route")
+    assertRepoOwnerPath("planned:src/core/future-route.mjs", "future route", "api_route")
   );
   assert.doesNotThrow(() =>
     assertRepoOwnerPath("planned:v2-browser-surface", "future policy", "planned_policy")
@@ -427,66 +407,6 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
   assert.match(agents, /deterministic route, DB verb, CLI helper, or\s+bounded AI owner/i);
   assert.match(agents, /\/api\/chat\/\*/);
   assert.match(agents, /POST \/api\/skill\/run/);
-});
-
-test("VER-05 docs, chat-first client, and backend routes keep discovery routing split aligned", () => {
-  const docs = [
-    ["AGENTS.md", agentsText],
-    ["docs/ARCHITECTURE.md", architectureText],
-    [artifactPaths.routingPolicy, routingPolicyText],
-  ];
-  const routePhrases = [
-    "/api/discovery/company-proposals",
-    "/api/discovery/company-proposal-decisions",
-    "/api/discovery/quick-start",
-    "/api/discovery/next",
-    "/api/chat/*",
-    "POST /api/skill/run",
-  ];
-  const policyPatterns = [
-    /local company proposal/i,
-    /bounded AI/i,
-    /seed/i,
-    /advisory/i,
-    /deterministic validation/i,
-    /explicit/i,
-    /allowlist/i,
-    /confirm-first|confirmed writes/i,
-    /source[- ]config|source config|careerrat companies|companyAtsUpsert/i,
-    /local proposal (errors|failures)[^.]+(do not|must not)[^.]+silently[^.]+(chat|\/api\/chat|full skill runtime|POST \/api\/skill\/run)/i,
-  ];
-
-  for (const [label, text] of docs) {
-    assertContainsAll(text, routePhrases, label);
-    assertMatchesAll(text, policyPatterns, label);
-  }
-
-  assertContainsAll(
-    webApiText,
-    ["export function createCompanyProposals", 'apiFetch("/api/discovery/company-proposals"'],
-    "apps/web/src/lib/api.js"
-  );
-  assertContainsAll(
-    chatFirstApiText,
-    ["createCompanyProposals", "export const firstRunApi"],
-    "apps/web/src/chat-first/api.js"
-  );
-  assertContainsAll(
-    discoveryRouteText,
-    [
-      'addRoute("GET", "/api/discovery/company-proposals"',
-      'addRoute("POST", "/api/discovery/company-proposal-decisions"',
-    ],
-    "src/cli/discovery-route.mjs"
-  );
-
-  const localProposalWrappers = requiredSlice(
-    webApiText,
-    "export function createCompanyProposals",
-    "export async function suggestAssist",
-    "apps/web/src/lib/api.js local proposal wrappers"
-  );
-  assert.doesNotMatch(localProposalWrappers, /\/api\/chat|\/api\/skill\/run/);
 });
 
 test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 coverage", () => {

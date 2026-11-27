@@ -2,20 +2,30 @@ import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
+import {
+  appendOnboardingWriteLog,
+  onboardingConfigEntries,
+  onboardingEvidenceEntries,
+} from "../src/core/agent/onboarding-write-log.mjs";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { WORKSPACE_THREAD_ID, workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { candidateConfigGet, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
+} from "../src/core/db/verbs.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
+import { computeEvidenceWrite } from "../src/core/profile/evidence-writer.mjs";
+import { classifyConfigChange } from "../src/core/profile/loosening.mjs";
 
 const cleanupRoots = [];
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -44,42 +54,49 @@ function tempRepo() {
   return repoRoot;
 }
 
-function bootServer(repoRoot) {
-  const routes = new Map();
-  mountOnboardRoutes({
-    addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
-    repoRoot,
-    env: {},
+// The same sequence the retired onboarding route ran for a tracked save:
+// read the doc, patch it (plus an optional mirror doc), then log one entry set.
+function saveOnboardingConfig(repoRoot, name, patch, { mirror } = {}) {
+  const ctx = { repoRoot, env: {} };
+  const before = candidateConfigGet(ctx)[name];
+  const mirrorBefore = mirror ? candidateConfigGet(ctx)[mirror.doc] : undefined;
+  candidateConfigPatch({ ...ctx, name, patch });
+  if (mirror) candidateConfigPatch({ ...ctx, name: mirror.doc, patch: mirror.patch });
+  const docs = candidateConfigGet(ctx);
+  return appendOnboardingWriteLog({
+    ...ctx,
+    entries: onboardingConfigEntries({
+      name,
+      patch,
+      before,
+      after: docs[name],
+      mirror: mirror
+        ? {
+            name: mirror.doc,
+            patch: mirror.patch,
+            before: mirrorBefore,
+            after: docs[mirror.doc],
+          }
+        : undefined,
+    }),
   });
-  return { routes };
 }
 
-async function post(server, path, payload) {
-  const route = server.routes.get(`POST ${path}`);
-  assert.ok(route, `missing route: POST ${path}`);
-  let done;
-  const ended = new Promise((resolve) => {
-    done = resolve;
-  });
-  const req = Readable.from([Buffer.from(JSON.stringify(payload))]);
-  req.method = "POST";
-  req.url = path;
-  const res = {
-    status: null,
-    rawBody: "",
-    writeHead(status) {
-      this.status = status;
-      return this;
-    },
-    end(chunk = "") {
-      this.rawBody += chunk;
-      done();
-      return this;
-    },
-  };
-  await route(req, res);
-  if (res.status === null) await ended;
-  return { status: res.status, body: res.rawBody ? JSON.parse(res.rawBody) : {} };
+function saveOnboardingEvidence(repoRoot, claims) {
+  const ctx = { repoRoot, env: {} };
+  const beforeClaims = candidateConfigGet(ctx).evidence?.claims || [];
+  const result = candidateEvidenceMerge({ ...ctx, claims });
+  const logged =
+    result.added > 0
+      ? appendOnboardingWriteLog({
+          ...ctx,
+          entries: onboardingEvidenceEntries({
+            beforeClaims,
+            afterClaims: candidateConfigGet(ctx).evidence?.claims || [],
+          }),
+        })
+      : undefined;
+  return { ...result, logged };
 }
 
 function threadMessages(repoRoot) {
@@ -105,20 +122,17 @@ after(() => {
 
 test("an onboarding config save appends one action_result with an entry per value and an Undo", async () => {
   const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
   const before = candidateConfigGet({ repoRoot, env: {} }).profile.candidate;
-  const { status, body } = await post(server, "/api/onboard/candidate/profile", {
-    source: "onboarding",
-    data: { candidate: { full_name: "Ada Lovelace", email: "ada@example.test" } },
+  const loggedId = saveOnboardingConfig(repoRoot, "profile", {
+    candidate: { full_name: "Ada Lovelace", email: "ada@example.test" },
   });
-  assert.equal(status, 200);
-  assert.ok(body.logged);
+  assert.ok(loggedId);
 
   const messages = logged(repoRoot);
   assert.equal(messages.length, 1);
   const [message] = messages;
   assert.equal(message.kind, "action_result");
-  assert.equal(message.id, body.logged);
+  assert.equal(message.id, loggedId);
   assert.equal(message.artifacts.length, 2);
   assert.ok(message.artifacts.every((entry) => entry.kind === "knowledge_write"));
   assert.ok(message.artifacts.every((entry) => entry.source.kind === "onboarding"));
@@ -137,31 +151,25 @@ test("an onboarding config save appends one action_result with an entry per valu
   assert.equal(after.email, "ada@example.test");
 });
 
-test("a save without source onboarding logs nothing", async () => {
+test("the evidence firewall rejects a placeholder claim and an accepted seed logs with an Undo", async () => {
   const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  const { status, body } = await post(server, "/api/onboard/candidate/profile", {
-    data: { candidate: { full_name: "Grace Hopper" } },
+  const plan = computeEvidenceWrite({
+    newClaim: { claim: "Led the [Company] migration", evidence: "Stated during setup" },
+    currentClaims: [],
   });
-  assert.equal(status, 200);
-  assert.equal(body.logged, undefined);
-  assert.equal(logged(repoRoot).length, 0);
-});
+  assert.equal(plan.ok, false);
+  assert.match(plan.error, /placeholder/i);
 
-test("the evidence seed runs the firewall: a placeholder claim is rejected and not saved", async () => {
-  const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  const { status, body } = await post(server, "/api/onboard/evidence-seed", {
-    source: "onboarding",
-    claims: [
-      { claim: "Led the [Company] migration", evidence: "Stated during setup" },
-      { claim: "Cut deploy time from 40 minutes to 8", evidence: "Stated during setup" },
-    ],
+  const good = computeEvidenceWrite({
+    newClaim: {
+      claim: "Cut deploy time from 40 minutes to 8",
+      evidence: "Stated during setup",
+    },
+    currentClaims: [],
   });
-  assert.equal(status, 200);
-  assert.equal(body.added, 1);
-  assert.equal(body.rejected.length, 1);
-  assert.match(body.rejected[0].reason, /placeholder/i);
+  assert.equal(good.ok, true);
+  const result = saveOnboardingEvidence(repoRoot, [good.claim]);
+  assert.equal(result.added, 1);
   const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
   assert.deepEqual(
     claims.map((claim) => claim.claim),
@@ -178,92 +186,41 @@ test("the evidence seed runs the firewall: a placeholder claim is rejected and n
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).evidence.claims.length, 0);
 });
 
-test("the evidence seed never overwrites a saved claim that shares a derived id", async () => {
-  const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  await post(server, "/api/onboard/evidence-seed", {
-    claims: [{ claim: "Ran the on-call rotation", evidence: "First evidence" }],
-  });
-  const again = await post(server, "/api/onboard/evidence-seed", {
-    claims: [{ claim: "Ran the on-call rotation", evidence: "Different evidence" }],
-  });
-  assert.equal(again.body.added, 0);
-  assert.equal(again.body.skipped, 1);
-  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
-  assert.equal(claims.length, 1);
-  assert.equal(claims[0].evidence, "First evidence");
+test("lowering the pay floor loosens a boundary; a first value or a raise does not", () => {
+  const verdict = (before, minimum) =>
+    classifyConfigChange(
+      "profile",
+      { compensation: before },
+      { compensation: { minimum_base: minimum } }
+    );
+  assert.equal(verdict({}, 150000).loosens, false);
+  assert.equal(verdict({ minimum_base: 150000 }, 160000).loosens, false);
+  const lowered = verdict({ minimum_base: 160000 }, 120000);
+  assert.equal(lowered.loosens, true);
+  assert.equal(lowered.reasons.length, 1);
 });
 
-test("an onboarding save that lowers the pay floor needs confirmed: true", async () => {
-  const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  const save = (extra = {}, minimum = 150000) =>
-    post(server, "/api/onboard/candidate/profile", {
-      source: "onboarding",
-      data: { compensation: { minimum_base: minimum } },
-      ...extra,
-    });
-
-  // First-time value and a raise apply directly.
-  assert.equal((await save()).status, 200);
-  assert.equal((await save({}, 160000)).status, 200);
-
-  const refused = await save({}, 120000);
-  assert.equal(refused.status, 409);
-  assert.equal(refused.body.code, "CONFIRMATION_REQUIRED");
-  assert.equal(refused.body.reasons.length, 1);
-  assert.equal(candidateConfigGet({ repoRoot, env: {} }).profile.compensation.minimum_base, 160000);
-
-  const confirmed = await save({ confirmed: true }, 120000);
-  assert.equal(confirmed.status, 200);
-  assert.equal(candidateConfigGet({ repoRoot, env: {} }).profile.compensation.minimum_base, 120000);
+test("removing a do-not-claim entry loosens the honesty boundary, adding one does not", () => {
+  const tools = (doNotClaim) => ({ tools: { do_not_claim: doNotClaim } });
+  assert.equal(classifyConfigChange("honesty", tools([]), tools(["Rust"])).loosens, false);
+  assert.equal(
+    classifyConfigChange("honesty", tools(["Rust"]), tools(["Rust", "Go"])).loosens,
+    false
+  );
+  assert.equal(classifyConfigChange("honesty", tools(["Rust", "Go"]), tools(["Go"])).loosens, true);
 });
 
-test("removing a do-not-claim entry in onboarding needs confirmed, adding one does not", async () => {
-  const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  const save = (tools, extra = {}) =>
-    post(server, "/api/onboard/candidate/honesty", {
-      source: "onboarding",
-      data: { tools },
-      ...extra,
-    });
-  assert.equal((await save({ do_not_claim: ["Rust"] })).status, 200);
-  assert.equal((await save({ do_not_claim: ["Rust", "Go"] })).status, 200);
-  const refused = await save({ do_not_claim: ["Go"] });
-  assert.equal(refused.status, 409);
-  assert.equal(refused.body.code, "CONFIRMATION_REQUIRED");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).honesty.tools.do_not_claim, [
-    "Rust",
-    "Go",
-  ]);
-  assert.equal((await save({ do_not_claim: ["Go"] }, { confirmed: true })).status, 200);
-});
-
-test("the first confirmed tools on a fresh workspace save without a 409", async () => {
-  const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
-  const saved = await post(server, "/api/onboard/candidate/honesty", {
-    source: "onboarding",
-    data: { tools: { confirmed: ["Postgres", "Kafka"] } },
-  });
-  assert.equal(saved.status, 200);
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).honesty.tools.confirmed, [
-    "Postgres",
-    "Kafka",
-  ]);
+test("the first confirmed tools on a fresh workspace do not loosen anything", () => {
+  const { honesty } = candidateConfigGet({ repoRoot: tempRepo(), env: {} });
+  const after = { ...honesty, tools: { ...honesty.tools, confirmed: ["Postgres", "Kafka"] } };
+  assert.equal(classifyConfigChange("honesty", honesty, after).loosens, false);
 });
 
 test("a location save logs mode_preferences_confirmed as a companion and Undo restores both", async () => {
   const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
   const before = candidateConfigGet({ repoRoot, env: {} }).profile.location;
   assert.notEqual(before.mode_preferences_confirmed, true);
-  const { status } = await post(server, "/api/onboard/candidate/profile", {
-    source: "onboarding",
-    data: { location: { remote: false } },
-  });
-  assert.equal(status, 200);
+  saveOnboardingConfig(repoRoot, "profile", { location: { remote: false } });
   const [message] = logged(repoRoot);
   assert.equal(message.artifacts.length, 1);
   const [entry] = message.artifacts;
@@ -280,21 +237,24 @@ test("a location save logs mode_preferences_confirmed as a companion and Undo re
   assert.notEqual(restored.mode_preferences_confirmed, true);
 });
 
+const AUTHORIZATION_MIRROR = {
+  doc: "form-defaults",
+  patch: { work_authorization: "Yes" },
+};
+
 test("work authorization with a mirror logs one entry spanning both docs; Undo restores both", async () => {
   const repoRoot = tempRepo();
-  const server = bootServer(repoRoot);
   const docs = () => candidateConfigGet({ repoRoot, env: {} });
   const before = {
     profile: structuredClone(docs().profile.authorization),
     form: structuredClone(docs()["form-defaults"]),
   };
-  const save = () =>
-    post(server, "/api/onboard/candidate/profile", {
-      source: "onboarding",
-      data: { authorization: { work_authorized: true } },
-      mirror: { doc: "form-defaults", patch: { work_authorization: "Yes" } },
-    });
-  assert.equal((await save()).status, 200);
+  saveOnboardingConfig(
+    repoRoot,
+    "profile",
+    { authorization: { work_authorized: true } },
+    { mirror: AUTHORIZATION_MIRROR }
+  );
   assert.equal(docs().profile.authorization.work_authorized, true);
   assert.equal(docs()["form-defaults"].work_authorization, "Yes");
 
@@ -312,22 +272,19 @@ test("work authorization with a mirror logs one entry spanning both docs; Undo r
 test("a mirrored authorization Undo refuses when either doc changed since", async () => {
   for (const stale of ["profile", "form-defaults"]) {
     const repoRoot = tempRepo();
-    const server = bootServer(repoRoot);
-    await post(server, "/api/onboard/candidate/profile", {
-      source: "onboarding",
-      data: { authorization: { work_authorized: true } },
-      mirror: { doc: "form-defaults", patch: { work_authorization: "Yes" } },
-    });
+    saveOnboardingConfig(
+      repoRoot,
+      "profile",
+      { authorization: { work_authorized: true } },
+      { mirror: AUTHORIZATION_MIRROR }
+    );
     const [message] = logged(repoRoot);
-    if (stale === "profile") {
-      await post(server, "/api/onboard/candidate/profile", {
-        data: { authorization: { work_authorized: false } },
-      });
-    } else {
-      await post(server, "/api/onboard/candidate/form-defaults", {
-        data: { work_authorization: "No" },
-      });
-    }
+    const name = stale === "profile" ? "profile" : "form-defaults";
+    const patch =
+      stale === "profile"
+        ? { authorization: { work_authorized: false } }
+        : { work_authorization: "No" };
+    candidateConfigPatch({ repoRoot, env: {}, name, patch });
     const result = await executeWorkspaceIntent({
       repoRoot,
       env: {},

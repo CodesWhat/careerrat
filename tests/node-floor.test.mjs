@@ -48,31 +48,6 @@ test("the guard leaves Electron's bundled Node alone", async () => {
   assert.match(result.stdout, /ran/, result.stderr);
 });
 
-for (const [version, expectedStatus] of [
-  ["24.22.0", 1],
-  ["24.22.1", 0],
-]) {
-  test(`the direct server CLI handles Node ${version} before serving`, () => {
-    const home = mkdtempSync(join(tmpdir(), "careerrat-node-floor-"));
-    const entry = new URL("../src/cli/tracker-dev.mjs", import.meta.url);
-    const script = `Object.defineProperty(process.versions,"node",{value:${JSON.stringify(version)}});process.argv=[process.execPath,${JSON.stringify(fileURLToPath(entry))},"--help"];await import(${JSON.stringify(entry.href)});`;
-    try {
-      const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
-        encoding: "utf8",
-        timeout: 10000,
-        cwd: home,
-        env: { ...process.env, CAREERRAT_HOME: home },
-      });
-      assert.equal(result.error, undefined);
-      assert.equal(result.status, expectedStatus, result.stderr);
-      if (expectedStatus === 1) assert.match(result.stderr, /Upgrade to Node\.js 24\.22\.1/);
-      else assert.match(result.stdout, /--port/);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-}
-
 test("careerrat doctor refuses Node 24.22.0 and names the upgrade", () => {
   const home = mkdtempSync(join(tmpdir(), "careerrat-node-floor-doctor-"));
   const entry = new URL("../src/cli/doctor.mjs", import.meta.url);

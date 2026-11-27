@@ -15,7 +15,6 @@ const PRODUCT_FILES = [
   "src/core/apply/form-fill.mjs",
   "src/core/apply/apply-driver.mjs",
   "src/core/automation/consent.mjs",
-  "src/core/tracker/settings-snapshot.mjs",
   "src/core/agent/workspace-agent.mjs",
   ".agents/skills/apply-job/SKILL.md",
   "templates/form-defaults.example.yml",
@@ -113,7 +112,6 @@ test("prose points people at the submit command, not at hand-editing automation.
     "apps/docs/content/docs/guides/applying.mdx",
     "apps/docs/content/docs/reference/disclaimer.mdx",
     "src/core/agent/workspace-agent.mjs",
-    "apps/web/src/chat-first/conversation-surfaces.jsx",
   ]) {
     assert.doesNotMatch(
       read(relativePath),

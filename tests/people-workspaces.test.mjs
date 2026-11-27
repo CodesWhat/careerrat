@@ -253,37 +253,6 @@ test("listPeople marks a person ready only when their own setup is search-ready"
   assert.deepEqual(listPeople({ repoRoot: REPO_ROOT, env }), [{ name: "empty", ready: false }]);
 });
 
-test("the app server reports who it is running for and who else exists", async (t) => {
-  const base = tempBase(t);
-  mkdirSync(join(base, "people", "alice"), { recursive: true });
-  mkdirSync(join(base, "people", "bob"), { recursive: true });
-  const { mountPeopleRoutes } = await import("../src/cli/people-route.mjs");
-  const routes = new Map();
-  const addRoute = (method, path, handler) => routes.set(`${method} ${path}`, handler);
-  const env = personEnv({ repoRoot: REPO_ROOT, env: { CAREERRAT_HOME: base }, name: "alice" });
-  mountPeopleRoutes({ addRoute, repoRoot: REPO_ROOT, env });
-  let body = "";
-  let status = 0;
-  const res = {
-    writeHead(code) {
-      status = code;
-    },
-    setHeader() {},
-    end(chunk) {
-      body = chunk;
-    },
-  };
-  routes.get("GET /api/people")({}, res);
-  assert.equal(status, 200);
-  assert.deepEqual(JSON.parse(body), {
-    current: "alice",
-    people: [
-      { name: "alice", ready: false },
-      { name: "bob", ready: false },
-    ],
-  });
-});
-
 test("--for applies before update, so update never runs against the owner's workspace", (t) => {
   const base = tempBase(t);
   const res = cli(base, ["--for", "ghost", "update", "--check"], {
@@ -323,22 +292,4 @@ test("resolvePersonSelection requires the person to exist and is idempotent", (t
   assert.equal(first.CAREERRAT_PEOPLE_BASE, base);
   const again = resolvePersonSelection({ repoRoot: REPO_ROOT, env: { ...env, ...first } });
   assert.deepEqual(again, first);
-});
-
-test("running tracker-dev directly applies the person selection", (t) => {
-  const base = tempBase(t);
-  const run = (extra) =>
-    spawnSync(process.execPath, [join(REPO_ROOT, "src/cli/tracker-dev.mjs")], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      timeout: 8000,
-      killSignal: "SIGKILL",
-      env: cleanEnv({ CAREERRAT_HOME: base, ...extra }),
-    });
-  const missing = run({ CAREERRAT_PERSON: "ghost" });
-  assert.equal(missing.status, 1, missing.stdout + missing.stderr);
-  assert.match(missing.stderr, /No workspace for "ghost"/);
-  const blank = run({ CAREERRAT_PERSON: "  " });
-  assert.equal(blank.status, 1);
-  assert.match(blank.stderr, /CAREERRAT_PERSON is set but blank/);
 });

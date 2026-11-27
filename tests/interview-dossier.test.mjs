@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
-import { mountInterviewPrepRoutes } from "../src/cli/interview-prep-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appUpsert, candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs.mjs";
 import { buildInterviewDossier } from "../src/core/interview/dossier.mjs";
@@ -121,43 +119,6 @@ function readApp(repoRoot, id) {
   return row ? JSON.parse(row.data) : null;
 }
 
-function mountDirect(repoRoot) {
-  const routes = new Map();
-  mountInterviewPrepRoutes({
-    addRoute(method, path, handler) {
-      routes.set(`${method} ${path}`, handler);
-    },
-    repoRoot,
-    env: {},
-  });
-  return routes;
-}
-
-async function callDirect(routes, method, path, payload) {
-  const handler = routes.get(`${method} ${path.split("?")[0]}`);
-  assert.ok(handler, `expected mounted route for ${method} ${path}`);
-  const req =
-    method === "POST"
-      ? Readable.from([Buffer.from(JSON.stringify(payload ?? {}))])
-      : Readable.from([]);
-  req.method = method;
-  req.url = path;
-  req.headers = method === "POST" ? { "content-type": "application/json" } : {};
-  let status = 200;
-  let responseBody = "";
-  const res = {
-    writeHead(nextStatus) {
-      status = nextStatus;
-      return this;
-    },
-    end(chunk = "") {
-      responseBody += String(chunk);
-    },
-  };
-  await handler(req, res);
-  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
-}
-
 test("buildInterviewDossier renders and persists an evidence-grounded dossier", () => {
   const repoRoot = tempRepo();
   seedCandidate(repoRoot);
@@ -203,59 +164,4 @@ test("buildInterviewDossier fails actionably when the captured JD body is missin
     (error) =>
       error.code === "MISSING_JOB_BODY" && /capture the job description/i.test(error.message)
   );
-});
-
-test("interview-prep route builds and reads the persisted dossier", async () => {
-  const repoRoot = tempRepo();
-  seedCandidate(repoRoot);
-  seedInterview(repoRoot);
-  const routes = mountDirect(repoRoot);
-
-  const built = await callDirect(routes, "POST", "/api/interview-prep/build", {
-    applicationId: "app-temporal",
-  });
-  assert.equal(built.status, 200);
-  assert.equal(built.body.ok, true);
-  assert.equal(built.body.data.applicationId, "app-temporal");
-  assert.match(built.body.data.dossier.markdown, /# Interview Packet/);
-
-  const read = await callDirect(routes, "GET", "/api/interview-prep?id=app-temporal");
-  assert.equal(read.status, 200);
-  assert.deepEqual(read.body.data.dossier, built.body.data.dossier);
-  assert.match(read.body.data.dossier.html, /<h1>Interview Packet<\/h1>/);
-  assert.doesNotMatch(read.body.data.dossier.html, /# Interview Packet/);
-});
-
-test("interview-prep route returns a console-clean missing state before a dossier is built", async () => {
-  const repoRoot = tempRepo();
-  seedCandidate(repoRoot);
-  seedInterview(repoRoot);
-  const routes = mountDirect(repoRoot);
-
-  const read = await callDirect(routes, "GET", "/api/interview-prep?id=app-temporal");
-  assert.equal(read.status, 200);
-  assert.equal(read.body.ok, true);
-  assert.equal(read.body.data.applicationId, "app-temporal");
-  assert.equal(read.body.data.dossier, null);
-  assert.equal(read.body.data.state, "missing");
-});
-
-test("interview-prep route returns typed 404 and 409 failures", async () => {
-  const repoRoot = tempRepo();
-  seedCandidate(repoRoot);
-  seedInterview(repoRoot, { id: "app-no-jd", withJd: false });
-  const routes = mountDirect(repoRoot);
-
-  const missing = await callDirect(routes, "POST", "/api/interview-prep/build", {
-    applicationId: "does-not-exist",
-  });
-  assert.equal(missing.status, 404);
-  assert.equal(missing.body.code, "NOT_FOUND");
-
-  const noJd = await callDirect(routes, "POST", "/api/interview-prep/build", {
-    applicationId: "app-no-jd",
-  });
-  assert.equal(noJd.status, 409);
-  assert.equal(noJd.body.code, "MISSING_JOB_BODY");
-  assert.match(noJd.body.error.message, /capture the job description/i);
 });

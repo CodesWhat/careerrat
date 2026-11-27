@@ -98,22 +98,15 @@ test("pre-commit guards reference tracked tests that still exist", async () => {
   );
 });
 
-test("document export fonts stay packaged while the app bundles its own fonts", async () => {
+test("document export fonts stay packaged", async () => {
   assert.equal(existsSync(join(root, "fonts")), false, "root fonts/ should not exist");
   for (const file of ["Geist-OFL.txt", "GeistMonoVF.woff2", "GeistVF.woff2"]) {
     assert.equal(existsSync(join(root, "assets", "fonts", file)), true, `${file} should ship`);
   }
 
-  const trackerDev = await readText("src/cli/tracker-dev.mjs");
   const documentExport = await readText("src/core/documents/export.mjs");
-  const webFoundation = await readText("apps/web/src/chat-first/app-foundation.css");
   const pkg = JSON.parse(await readText("package.json"));
-  const webPkg = JSON.parse(await readText("apps/web/package.json"));
-  assert.doesNotMatch(trackerDev, /FONTS_DIR|serveFont|"\/fonts\//);
   assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
-  assert.match(webFoundation, /@fontsource\/figtree\/400\.css/);
-  assert.equal(webPkg.dependencies["@fontsource/figtree"], "^5.3.0");
-  assert.doesNotMatch(webFoundation, /url\("\/fonts\//);
   assert.ok(!pkg.files.includes("fonts"));
 });
 
@@ -214,14 +207,11 @@ test("the published package runs no consumer lifecycle setup and start installs 
 
 test("update only reports a leftover browser workspace and never launches or kills one", async () => {
   const launcher = await readText("bin/careerrat.mjs");
-  const healthRoute = await readText("src/cli/tracker-dev.mjs");
 
   assert.match(launcher, /noticeRetiredBrowserWorkspace/);
   assert.match(launcher, /kill \$\{pid\}/);
   assert.doesNotMatch(launcher, /process\.kill\([^)]*SIG/);
   assert.doesNotMatch(launcher, /restartDashboardAfterUpdate|startDashboard|local-app-runtime/);
-  assert.match(healthRoute, /product:\s*"careerrat"/);
-  assert.match(healthRoute, /pid:\s*process\.pid/);
 });
 
 test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
@@ -443,17 +433,6 @@ test("explicit discovery requests do not require repeated approval for validated
   }
   assert.doesNotMatch(boards, /confirm-first is the default/i);
   assert.doesNotMatch(companies, /confirm-first is the default/i);
-});
-
-test("the app ships one fixed light visual mode", async () => {
-  const index = await readText("apps/web/index.html");
-  const foundation = await readText("apps/web/src/chat-first/app-foundation.css");
-  const workspace = await readText("apps/web/src/chat-first/chat-first.css");
-  assert.doesNotMatch(index, /theme-init\.js/);
-  assert.equal(existsSync(join(root, "apps/web/public/theme-init.js")), false);
-  assert.doesNotMatch(`${foundation}\n${workspace}`, /\[data-theme=["']?dark/);
-  assert.match(foundation, /--canvas:\s*#edf5fb/);
-  assert.match(foundation, /body\s*\{[^}]*background:\s*var\(--canvas\)/s);
 });
 
 test("local user data roots are excluded from git, docker, and Vercel surfaces", async () => {

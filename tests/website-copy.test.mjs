@@ -459,7 +459,6 @@ test("first-run setup presents Claude Code and Codex as choices, not a preferred
   const paths = {
     readme: "README.md",
     install: "apps/docs/content/docs/getting-started/install.mdx",
-    firstRun: "apps/web/src/chat-first/FirstRunExperience.jsx",
   };
   const copy = Object.fromEntries(
     await Promise.all(
