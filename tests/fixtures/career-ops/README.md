@@ -32,6 +32,8 @@ CR70 slice 8: the fixtures for vdab, weworkremotely, workingnomads, wttj, yourat
 
 CR70 slice 12: new fixtures for atlassian, factorial, hiringroom, generalist-world, germantechjobs, startup-jobs, pythonorg, prevueaps, hibob, inhire, remote-com, applitrack, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
 
+CR70 slice 13: new fixtures for aldi-nord, apple, bwi, bulldogjob, deel, bolt, dover, paylocity, polymer, redrover, notion, jazzhr, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location

@@ -66,6 +66,8 @@ CR70 slice 8 (2026-11-27) re-vendored verbatim from `13786939`: vdab, weworkremo
 
 CR70 slice 12 (2026-11-27) newly adopted from `13786939`: atlassian, factorial, hiringroom, generalist-world, germantechjobs, startup-jobs, pythonorg, prevueaps, hibob, inhire, remote-com, applitrack. The hibob fixture is a node:test suite; the remote-com, inhire and startup-jobs fixtures drop their `scan.mjs` cases. Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 13 (2026-11-27) newly adopted from `13786939`: aldi-nord, apple, bwi, bulldogjob, deel, bolt, dover, paylocity, polymer, redrover, notion, jazzhr. The aldi-nord fixture is a node:test suite; the apple and bolt fixtures drop their `scan.mjs` cases. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
