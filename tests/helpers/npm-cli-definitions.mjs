@@ -21,7 +21,7 @@ const require = createRequire(import.meta.url);
 // either a hoisted node_modules/@npmcli/config or Corepack's own install
 // cache for the pinned npm release. The CI verification job happens to seed
 // that cache (it runs `npm --version` through Corepack before this suite
-// runs), but the macOS desktop-release job runs bundled `npm ci` followed
+// runs), but a bundled-npm release job ran bundled `npm ci` followed
 // directly by `release:pretag` without ever invoking Corepack, and a fresh
 // developer machine using bundled npm has neither — both threw before this
 // suite ever registered a single test. Fix: @npmcli/config is now a plain,

@@ -1,6 +1,6 @@
 // strategy/review.mjs — the server-side compute for the native strategy-review
-// Ask workflow (`strategy.review` / `strategy.apply` / `strategy.stamp` intents
-// in workspace-agent.mjs). This is the HTTP-reachable sibling of the
+// Ask workflow (`strategy.review` / `strategy.apply` / `strategy.stamp` intents).
+// This is the HTTP-reachable sibling of the
 // reevaluate-strategy SKILL.md flow: the skill's file-driven, multi-turn
 // analysis (STEPS 0-9, subagent-fanned-out) is what a terminal session runs;
 // this module is what the embedded chat workspace runs instead, in one
@@ -714,7 +714,7 @@ function applyRerank({ repoRoot, env, proposal }) {
 }
 
 // Thin wrapper over gate-apply.mjs's shared applyGateWrite primitive (also
-// used by settings.apply in workspace-agent.mjs) — translates its plain,
+// used by the settings gate writes) — translates its plain,
 // code-less errors into this module's own STRATEGY_APPLY_INVALID /
 // VALIDATION_FAILED vocabulary so callers and existing tests see identical
 // behavior to when this logic lived here directly.
@@ -743,52 +743,73 @@ function applyGateType({ repoRoot, env, type, value }) {
 // restores status and priority). All-or-nothing: if any row is gone or any
 // snapshotted field changed again since the re-rank, nothing is restored.
 export function restoreRerankRows({ repoRoot, env, before, after }) {
-  const db = requireDb({ repoRoot, env });
-  const plan = [];
-  for (const prior of before) {
-    const expected = after.find((row) => row.id === prior.id);
-    const host = findHostRow(db, prior.id);
-    if (!expected || !host) return { ok: false };
-    const live = host.row;
-    const fields = ["status", "priority", ...RERANK_EXTRA_FIELDS[host.table]].filter((field) =>
-      Object.hasOwn(expected, field)
-    );
-    if (fields.some((field) => (live[field] ?? null) !== (expected[field] ?? null))) {
-      return { ok: false };
-    }
-    plan.push({ prior, expected, table: host.table });
-  }
-  for (const { prior, expected, table } of plan) {
-    const note = "Undid a strategy review re-rank.";
-    if (prior.status !== expected.status) {
-      const to = prior.status || "sourced";
-      if (table === "applications")
-        appSetStatus({ repoRoot, env, id: prior.id, to, note, restore: true });
-      else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
-    }
-    if (prior.priority !== expected.priority) {
-      if (prior.priority === null || prior.priority === undefined) {
-        restoreRowFields({ repoRoot, env, table, id: prior.id, fields: { priority: null } });
-      } else if (table === "applications") {
-        appSetFields({ repoRoot, env, id: prior.id, patch: { priority: prior.priority } });
-      } else {
-        sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
+  // One transaction for the recheck and every restore: a row that moved after
+  // the caller looked rolls the whole undo back, with nothing written.
+  try {
+    runVerb({ repoRoot, env }, (db) => {
+      const plan = [];
+      for (const prior of before) {
+        const expected = after.find((row) => row.id === prior.id);
+        const host = findHostRow(db, prior.id);
+        if (!expected || !host) throw rerankStale();
+        const live = host.row;
+        const fields = ["status", "priority", ...RERANK_EXTRA_FIELDS[host.table]].filter((field) =>
+          Object.hasOwn(expected, field)
+        );
+        if (fields.some((field) => (live[field] ?? null) !== (expected[field] ?? null))) {
+          throw rerankStale();
+        }
+        plan.push({ prior, expected, table: host.table });
       }
-    }
-    // Compare against the row as the status restore left it: restoring a status
-    // can clear fields the re-rank never touched (applied clears nextAction).
-    const restored = findHostRow(db, prior.id)?.row || {};
-    const extras = Object.fromEntries(
-      RERANK_EXTRA_FIELDS[table]
-        .filter((field) => Object.hasOwn(prior, field))
-        .filter((field) => (prior[field] ?? null) !== (restored[field] ?? null))
-        .map((field) => [field, prior[field] ?? null])
-    );
-    if (Object.keys(extras).length) {
-      restoreRowFields({ repoRoot, env, table, id: prior.id, fields: extras });
-    }
+      for (const { prior, expected, table } of plan) {
+        restoreRerankRow({ repoRoot, env, db, prior, expected, table });
+      }
+      return {};
+    });
+  } catch (error) {
+    if (error?.code === RERANK_STALE) return { ok: false };
+    throw error;
   }
   return { ok: true };
+}
+
+const RERANK_STALE = "RERANK_STALE";
+
+function rerankStale() {
+  const err = new Error("a re-ranked row changed since the re-rank");
+  err.code = RERANK_STALE;
+  return err;
+}
+
+function restoreRerankRow({ repoRoot, env, db, prior, expected, table }) {
+  const note = "Undid a strategy review re-rank.";
+  if (prior.status !== expected.status) {
+    const to = prior.status || "sourced";
+    if (table === "applications")
+      appSetStatus({ repoRoot, env, id: prior.id, to, note, restore: true });
+    else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
+  }
+  if (prior.priority !== expected.priority) {
+    if (prior.priority === null || prior.priority === undefined) {
+      restoreRowFields({ repoRoot, env, table, id: prior.id, fields: { priority: null } });
+    } else if (table === "applications") {
+      appSetFields({ repoRoot, env, id: prior.id, patch: { priority: prior.priority } });
+    } else {
+      sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
+    }
+  }
+  // Compare against the row as the status restore left it: restoring a status
+  // can clear fields the re-rank never touched (applied clears nextAction).
+  const restored = findHostRow(db, prior.id)?.row || {};
+  const extras = Object.fromEntries(
+    RERANK_EXTRA_FIELDS[table]
+      .filter((field) => Object.hasOwn(prior, field))
+      .filter((field) => (prior[field] ?? null) !== (restored[field] ?? null))
+      .map((field) => [field, prior[field] ?? null])
+  );
+  if (Object.keys(extras).length) {
+    restoreRowFields({ repoRoot, env, table, id: prior.id, fields: extras });
+  }
 }
 
 function applyFitBands({ repoRoot, env, proposal }) {

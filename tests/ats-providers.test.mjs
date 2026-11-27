@@ -114,12 +114,15 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
   // server-fetched, so the SSRF rationale the API-endpoint check enforces
   // does not apply to it. The old CareerRat-local fetchRecruitee dropped
   // untrusted-host offer URLs; the pinned upstream adapter keeps them.
+  // Pin 13786939 also folds a flat location's city, country and remote flag in
+  // when the location text does not already name them, and drops an offer with
+  // no usable https URL instead of emitting it with an empty one.
   assert.deepEqual(offers, [
     {
       title: "Platform Engineer",
       url: "https://acme.recruitee.com/o/platform-engineer",
       company: "Acme Systems",
-      location: "Anywhere in the US",
+      location: "Anywhere in the US, Ignored City, Ignored Country, Remote",
       comp: "",
       bodyText: "Build & operate systems.",
       bodyPartial: false,
@@ -145,27 +148,21 @@ test("fetchProvider maps Recruitee offers and validates returned offer URLs", as
       bodyPartial: true,
       provider: "recruitee",
     },
-    {
-      title: "Data Engineer",
-      url: "",
-      company: "Acme Systems",
-      location: "Remote",
-      comp: "",
-      bodyText: "",
-      bodyPartial: true,
-      provider: "recruitee",
-    },
   ]);
 });
 
-test("fetchProvider returns no Recruitee offers for missing or invalid envelopes", async () => {
+test("fetchProvider rejects a Recruitee response with a missing or invalid envelope", async () => {
+  // Upstream 13786939 throws instead of reading an unexpected body as an empty
+  // board, so a changed API surfaces as a failure rather than zero jobs.
   for (const payload of [{}, { offers: null }, { offers: {} }]) {
-    const offers = await fetchProvider(
-      "recruitee",
-      { name: "Acme Systems", careers_url: "https://acme.recruitee.com" },
-      async () => jsonResponse(payload)
+    await assert.rejects(
+      fetchProvider(
+        "recruitee",
+        { name: "Acme Systems", careers_url: "https://acme.recruitee.com" },
+        async () => jsonResponse(payload)
+      ),
+      /recruitee: unexpected response: expected offers\[\]/
     );
-    assert.deepEqual(offers, []);
   }
 });
 

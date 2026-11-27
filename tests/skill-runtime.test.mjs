@@ -162,19 +162,10 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: returns every shipped default when CAREERRAT_RUNTIME_SKILLS is unset", () => {
-  const repoRoot = tempRepoWithSkill([
-    "evaluate-job",
-    "answer-question",
-    "tailor-application",
-    "resume-extract",
-    "intake-extract",
-  ]);
+test("resolveAllowedSkills: no skill is allowed by default when CAREERRAT_RUNTIME_SKILLS is unset", () => {
+  const repoRoot = tempRepoWithSkill(["evaluate-job", "answer-question", "tailor-application"]);
   try {
-    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), [
-      "intake-extract",
-      "resume-extract",
-    ]);
+    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), []);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -666,10 +657,6 @@ test("installed Claude maps every shipped skill exactly once to its smallest enf
   assert.deepEqual(mapped, expected);
   assert.equal(new Set(mapped).size, expected.length);
   assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "answer-question" }), ["Skill"]);
-  assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "resume-extract" }), [
-    "Read",
-    "Skill",
-  ]);
   assert.deepEqual(resolveInstalledSkillRuntimeTools({ skill: "research-company" }), [
     "WebSearch",
     "WebFetch",
@@ -828,15 +815,15 @@ test("runSkillStream: agent candidate context exposes ordinary form defaults but
   }
 });
 
-test("runSkillStream: an explicit tools override (M8's resume-extract: ['Read']) reaches query() verbatim, not RUNTIME_TOOLS", async () => {
-  const repoRoot = tempRepoWithSkill(["evaluate-job", "resume-extract"]);
+test("runSkillStream: an explicit tools override (['Read']) reaches query() verbatim, not RUNTIME_TOOLS", async () => {
+  const repoRoot = tempRepoWithSkill("evaluate-job");
   try {
     let seenTools = null;
     await runSkillStream({
-      skill: "resume-extract",
+      skill: "evaluate-job",
       input: "hi",
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_RUNTIME_SKILLS: "evaluate-job" },
       tools: ["Read"],
       onEvent: () => {},
       loadSdk: async () => ({
@@ -1101,13 +1088,9 @@ test("runSkillStream: a completed SDK query clears its optional runtime deadline
 });
 
 test("runSkillStream: a selected installed CLI bypasses the Agent SDK and streams bounded events", async () => {
-  const repoRoot = tempRepoWithSkill("resume-extract");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
+  const repoRoot = tempRepoWithSkill("answer-question");
   const env = {
-    CAREERRAT_RUNTIME_SKILLS: "resume-extract",
+    CAREERRAT_RUNTIME_SKILLS: "answer-question",
     ANTHROPIC_MODEL: "claude-haiku-4-5-20251001",
   };
   writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
@@ -1115,14 +1098,10 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     const events = [];
     const calls = [];
     const result = await runSkillStream({
-      skill: "resume-extract",
-      action: "extract",
-      operation: "resume.extract",
-      input: { path: upload },
+      skill: "answer-question",
+      input: "Answer this form question.",
       repoRoot,
       env,
-      tools: ["Read"],
-      approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
       timeoutMs: 480_000,
       model: "opus",
@@ -1145,17 +1124,16 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     // Threaded so installed-runtimes.mjs can materialize an isolated skill
     // cwd for the "claude" runtimeId (see tests/installed-runtime.test.mjs) —
     // harmless/unused for every other installed runtime, codex included.
-    assert.equal(calls[0].skill, "resume-extract");
+    assert.equal(calls[0].skill, "answer-question");
     assert.equal(calls[0].repoRoot, repoRoot);
-    assert.deepEqual(calls[0].tools, ["Read", "Skill"]);
-    assert.deepEqual(calls[0].approvedReadPaths, [upload]);
+    assert.deepEqual(calls[0].tools, ["Skill"]);
     assert.deepEqual(calls[0].outputSchema, {
       type: "object",
       required: ["full_text"],
     });
     assert.equal(calls[0].timeoutMs, 480_000);
-    assert.doesNotMatch(calls[0].prompt, /\.agents\/skills\/resume-extract\/SKILL\.md/);
-    assert.match(calls[0].prompt, new RegExp(upload.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(calls[0].prompt, /\.agents\/skills\/answer-question\/SKILL\.md/);
+    assert.match(calls[0].prompt, /Answer this form question\./);
     assert.match(calls[0].prompt, /can only return its bounded model result/i);
     assert.deepEqual(
       events.map(({ type }) => type),

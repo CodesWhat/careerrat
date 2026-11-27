@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/desktop/build/icon.png" alt="CareerRat" width="112">
+<img src="assets/icon.png" alt="CareerRat" width="112">
 
 <h1>CareerRat</h1>
 
@@ -42,23 +42,19 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of November 3, 2026:** v0.24.0 is the latest release. CareerRat installs
+**As of November 27, 2026:** v0.26.0 is the next release. CareerRat installs
 from npm and runs on your machine, in your terminal, with the AI CLI you already
 use. v0.19.2 was the last release with a Mac app.
 
-New in v0.24.0:
+New in v0.26.0:
 
-- An Activity tab shows background searches as they run, and Search jobs starts
-  one straight away.
-- Generated résumés, cover letters and AI-drafted packet answers are fact-checked.
-  Review saved and deterministic answers yourself. One-off chat answers aren't
-  automatically checked. Eligible cover-letter and answer drafts may get a wording
-  review when it's enabled in `modes.yml` and available. Deterministic answers are
-  excluded; a failed review leaves the draft unchanged.
-- Honest outcome rates, fake-recruiter warnings, and your corrections saved as
-  writing rules.
-- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
-  may need native build tools.
+- CareerRat is a terminal product now. The Mac app and the browser workspace are
+  retired, and `careerrat start` opens the terminal workspace.
+- About 70 more job boards and hiring systems can be searched, and the sources
+  that were already there are updated.
+- Fixes so your data stays right: removing a person, restoring a backup and
+  undoing a change are safer, and two runs can no longer double-apply a database
+  update.
 
 New in v0.23.0:
 
@@ -98,7 +94,7 @@ build; switch with `npm i -g careerrat`.
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Release process | [`docs/RELEASE.md`](docs/RELEASE.md) |
-| Windows status | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
+| Windows install | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
 | Contributing convention | [`AGENTS.md`](AGENTS.md) |
 | Security policy | [`.github/SECURITY.md`](.github/SECURITY.md) |
 | Issues | [GitHub Issues](https://github.com/CodesWhat/careerrat/issues) |
@@ -137,7 +133,7 @@ careerrat start
 ```
 
 `careerrat start` opens the CareerRat workspace in your terminal. The Mac app
-and the browser workspace are being retired.
+and the browser workspace are retired.
 
 The Mac app ended at v0.19.2 and is no longer updated. The `.dmg` and the
 Homebrew cask are frozen at that version, so install from npm.
@@ -208,10 +204,8 @@ you keep working:
 <details>
 <summary>Windows</summary>
 
-The Windows x64 installer passed build, install, launch, export, and uninstall
-QA. A public Windows installer will ship only after SignPath Foundation signing
-is available; SignPath requires project reputation CareerRat does not yet have.
-See [Windows status](docs/WINDOWS.md).
+Windows installs from npm like every other platform. There is no Windows
+installer. See [Windows: install from npm](docs/WINDOWS.md).
 
 There is no mobile app and no Intel Mac build.
 
@@ -222,15 +216,11 @@ There is no mobile app and no Intel Mac build.
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.24.0 highlights</strong></summary>
+<summary><strong>v0.26.0 highlights</strong></summary>
 
-- The terminal workspace has an Activity tab. Search jobs runs in the background
-  and shows its progress there.
-- Saved résumés and cover letters are fact-checked. One-off chat answers are not
-  automatically checked.
-- Honest outcome rates and fake-recruiter warnings.
-- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
-  may need native build tools.
+- CareerRat is a terminal product. The browser workspace is retired.
+- About 70 more job boards and hiring systems can be searched.
+- Removing a person, restoring a backup and undoing a change are safer.
 - CareerRat ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
@@ -334,7 +324,7 @@ the interruption. Use Search jobs to retry with another search.
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,
 interview dossiers, resumes, and exports remain readable Markdown, PDF, or other
-normal files. See the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
+normal files.
 
 ### Your data stays on your machine
 
@@ -356,14 +346,14 @@ Your workspace stays on your machine and can be exported.
   works as a manual check-and-download action. Windows self-update stays off
   until its installed app and final installer share a complete signing chain.
 - The public website uses cookieless, privacy-limited aggregate analytics. The
-  local app does not load that website analytics client.
+  CareerRat itself does not load that website analytics client.
 
 Read the full [privacy documentation](https://careerrat.com/docs/advanced/privacy),
-[data contract](docs/DATA_CONTRACT.md), and [Code signing policy](docs/CODE_SIGNING_POLICY.md).
+and [data contract](docs/DATA_CONTRACT.md).
 
 </details>
 
-### 28 skills, one workflow
+### 26 skills, one workflow
 
 The terminal workspace and the CLI share the same public skill definitions. You never
 have to know their names; Paul routes to the right one for what you ask.
@@ -372,8 +362,6 @@ have to know their names; Paul routes to the right one for what you ask.
 <summary><strong>Setup and intake</strong></summary>
 
 - `ingest-profile`: conversational candidate setup and resume intake
-- `resume-extract`: structured facts from PDF, image, or DOCX resumes
-- `intake-extract`: verbatim extraction from general dropped files
 - `configure`: inspect and change validated CareerRat settings
 
 </details>
@@ -519,8 +507,9 @@ careerrat start
 
 `careerrat start` and `careerrat tui` are the same command: they open the
 terminal workspace. `careerrat start claude` or `careerrat start codex` picks the
-agent, and `--no-agent` skips it. `careerrat start --browser` still serves the
-legacy browser workspace (with `--no-open` and `--port`) until it is removed.
+agent, and `--no-agent` skips it. The browser workspace was retired in v0.26:
+`careerrat start --browser` and `careerrat tracker-dev` print a retired message
+and exit 1.
 
 Useful terminal commands:
 
@@ -529,7 +518,6 @@ careerrat next          # show the next useful agent-led workflow
 careerrat doctor        # verify setup, data, skills, and runtime health
 careerrat update        # update an npm installation without touching user data
 careerrat tracker       # write a recovery snapshot and summary
-careerrat tracker-dev   # legacy: serve the browser workspace at localhost:7777
 ```
 
 ### Textual workspace

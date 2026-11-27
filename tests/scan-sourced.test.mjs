@@ -390,10 +390,16 @@ test("offer liveness verification uses bounded concurrency", async () => {
       },
     });
 
+    // Generous ceiling: the verifier either starts four probes while the first
+    // are still held open, or the scan is serial and this never resolves.
+    let giveUp;
     const ranConcurrently = await Promise.race([
       fourStarted.promise.then(() => true),
-      new Promise((resolve) => setTimeout(() => resolve(false), 75)),
+      new Promise((resolve) => {
+        giveUp = setTimeout(() => resolve(false), 30_000);
+      }),
     ]);
+    clearTimeout(giveUp);
     release.resolve();
     const summary = await scan;
 

@@ -10,15 +10,10 @@ import test from "node:test";
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
-// Packages that are deliberately NOT synced to the root version: apps/web
-// (SPA shell, still 0.1.0), apps/website (marketing site, still 0.0.0), and
-// apps/docs (docs site, still 0.0.0). Do not add a version-sync assertion for
-// these — they ship independently of the CLI/desktop pair.
-const UNVERSIONED_APP_PACKAGE_JSON_PATHS = [
-  "apps/web/package.json",
-  "apps/website/package.json",
-  "apps/docs/package.json",
-];
+// Packages that are deliberately NOT synced to the root version: apps/website
+// (marketing site, still 0.0.0) and apps/docs (docs site, still 0.0.0). Do not add a version-sync assertion for
+// these — they ship independently of the CLI.
+const UNVERSIONED_APP_PACKAGE_JSON_PATHS = ["apps/website/package.json", "apps/docs/package.json"];
 
 // Round-trip rather than a NaN check. JS silently normalizes an out-of-range
 // day instead of rejecting it, so `2026-02-30` parses fine and comes back as
@@ -40,18 +35,7 @@ function findNewestChangelogHeading(changelog) {
   return null;
 }
 
-test("package.json and apps/desktop/package.json versions are identical", async () => {
-  const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));
-  const desktopPackageJson = JSON.parse(await readFile("apps/desktop/package.json", "utf8"));
-
-  assert.equal(
-    desktopPackageJson.version,
-    rootPackageJson.version,
-    `\`apps/desktop/package.json\` is ${desktopPackageJson.version} but \`package.json\` is ${rootPackageJson.version}. The CLI and desktop app ship as a pair; bump both.`
-  );
-});
-
-// package-lock.json carries the version in three places, and `npm version` /
+// package-lock.json carries the version in two places, and `npm version` /
 // `npm install --package-lock-only` update all three. A release that edits
 // package.json by hand does not, which is exactly how the lockfile sat at
 // 0.9.0 while the published package was 0.10.0. A stale lockfile version does
@@ -59,7 +43,6 @@ test("package.json and apps/desktop/package.json versions are identical", async 
 test("package-lock.json versions match the root package.json version", async () => {
   const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));
   const lockfile = JSON.parse(await readFile("package-lock.json", "utf8"));
-  const desktopPackageJson = JSON.parse(await readFile("apps/desktop/package.json", "utf8"));
 
   const sites = [
     {
@@ -71,11 +54,6 @@ test("package-lock.json versions match the root package.json version", async () 
       label: 'package-lock.json `packages[""].version`',
       actual: lockfile.packages?.[""]?.version,
       expected: rootPackageJson.version,
-    },
-    {
-      label: 'package-lock.json `packages["apps/desktop"].version`',
-      actual: lockfile.packages?.["apps/desktop"]?.version,
-      expected: desktopPackageJson.version,
     },
   ];
 
@@ -163,7 +141,7 @@ test("the date check rejects dates that only look valid", () => {
 });
 
 // Guard against someone "helpfully" mass-bumping every package.json in the
-// monorepo to match the root/desktop version. apps/web, apps/website, and
+// monorepo to match the root version. apps/website and
 // apps/docs are intentionally on their own version tracks.
 test("intentionally unversioned apps do not track the root version", async () => {
   const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -173,7 +151,7 @@ test("intentionally unversioned apps do not track the root version", async () =>
     assert.notEqual(
       packageJson.version,
       rootPackageJson.version,
-      `\`${path}\` now matches the root version (${rootPackageJson.version}). This app is intentionally unversioned relative to the CLI/desktop pair; if it was bumped to match on purpose, update this test's exemption list instead of the assertion.`
+      `\`${path}\` now matches the root version (${rootPackageJson.version}). This app is intentionally unversioned relative to the CLI; if it was bumped to match on purpose, update this test's exemption list instead of the assertion.`
     );
   }
 });

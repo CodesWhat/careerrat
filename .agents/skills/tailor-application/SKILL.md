@@ -215,7 +215,7 @@ marker remains.
 
 Do not mark any artifact as upload-ready or build-ready until this exits 0.
 
-Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
+Then log the tailored artifacts to the Activity Pulse feed (the terminal workspace's activity log — see
 **Activity Pulse** in AGENTS.md). One event per tailoring run:
 
 ```sh
@@ -253,7 +253,7 @@ careerrat tracker --verify && careerrat tracker
 ```
 
 Both must exit 0 before continuing. Do not skip this on the standalone-artifacts
-path — without it, the dashboard has no durable record that tailored materials exist.
+path — without it, the terminal workspace has no durable record that tailored materials exist.
 
 **Real names, never placeholders — go generic when unknown.** Always use the
 candidate's real name (`candidate/profile.yml#candidate.preferred_name` →

@@ -32,7 +32,7 @@ jobs:
       && github.event.pull_request.state == 'open'
     permissions:
       pull-requests: write
-    uses: CodesWhat/.github/.github/workflows/greptile-summon.yml@01bf40b06b110946f12a49b82e407d77c6480df7 # frozen 2026-08-17
+    uses: CodesWhat/.github/.github/workflows/greptile-summon.yml@684a6b931e7802f1985e2cb4f6ea0c95861988e3 # frozen 2026-11-27
     with:
       pr_number: ${{ github.event.pull_request.number }}
       head_sha: ${{ github.event.pull_request.head.sha }}

@@ -75,7 +75,10 @@ try {
     pass("parseGarenaResponse escapes separators in office and id");
   else fail(`traversal[0].url = ${JSON.stringify(traversal[0]?.url)}`);
 
-  // Dot segments survive percent-encoding, so they are rejected instead.
+  // Dot segments survive percent-encoding, so they can't reach the path.
+  // `office` is config — a malformed one is a config bug and throws. `id` is
+  // per-posting remote data inside the parse loop, so a bad one drops just
+  // that posting (like a lone surrogate, or a missing id), never the page.
   for (const bad of [".", ".."]) {
     let rejected = false;
     try {
@@ -89,15 +92,44 @@ try {
     if (rejected) pass(`parseGarenaResponse rejects office ${JSON.stringify(bad)}`);
     else fail(`parseGarenaResponse should reject office ${JSON.stringify(bad)}`);
 
-    let idRejected = false;
+    let threw = false,
+      out;
     try {
-      parseGarenaResponse({ jobs: [{ id: bad, title: "Dot id", tags: {} }] }, {});
+      out = parseGarenaResponse(
+        {
+          jobs: [
+            { id: bad, title: "Dot id", tags: {} },
+            { id: "J9", title: "Good", tags: {} },
+          ],
+        },
+        {}
+      );
     } catch {
-      idRejected = true;
+      threw = true;
     }
-    if (idRejected) pass(`parseGarenaResponse rejects id ${JSON.stringify(bad)}`);
-    else fail(`parseGarenaResponse should reject id ${JSON.stringify(bad)}`);
+    if (!threw && out.length === 1 && out[0].url.endsWith("/careers/J9"))
+      pass(`parseGarenaResponse drops the id ${JSON.stringify(bad)} posting, keeps the rest`);
+    else
+      fail(
+        `parseGarenaResponse should drop id ${JSON.stringify(bad)} without throwing (threw=${threw}, out=${JSON.stringify(out)})`
+      );
   }
+
+  // A lone surrogate in `office` (config) throws URIError out of urlSegment's
+  // encodeURIComponent — a malformed config value fails loudly, the same as a
+  // `.`/`..` segment and unlike a bad per-posting `id`, which drops just that
+  // posting.
+  let surrogateOfficeThrew = false;
+  try {
+    parseGarenaResponse(
+      { jobs: [{ id: "J8", title: "Surrogate office", tags: {} }] },
+      { garena: { office: "sg\uD800" } }
+    );
+  } catch {
+    surrogateOfficeThrew = true;
+  }
+  if (surrogateOfficeThrew) pass("parseGarenaResponse throws on a lone-surrogate office");
+  else fail("parseGarenaResponse should throw on a lone-surrogate office");
 
   // Multiple locations join with ", ".
   const multiLoc = parseGarenaResponse(
@@ -156,8 +188,8 @@ try {
   else fail("garena.detect() should return null for non-string / missing url");
 
   // fetch() — POSTs an empty JSON body with redirect:'error' via mock ctx.
-  let calledUrl = null;
-  let calledOpts = null;
+  let calledUrl = null,
+    calledOpts = null;
   const mockCtx = {
     fetchJson: async (url, opts) => {
       calledUrl = url;
@@ -215,8 +247,8 @@ try {
     pass("garena.fetch() escapes the office in the API query string");
   else fail(`garena.fetch() escaped url = ${JSON.stringify(escapedUrl)}`);
 
-  let requested = false;
-  let dotRejected = false;
+  let requested = false,
+    dotRejected = false;
   try {
     await garena.fetch(
       { garena: { office: ".." } },

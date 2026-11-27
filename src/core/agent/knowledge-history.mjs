@@ -13,13 +13,7 @@ function invalidReference() {
   return error;
 }
 
-export function revertSavedKnowledge({
-  repoRoot,
-  env,
-  messageId,
-  index,
-  setFields = appSetFields,
-}) {
+function revertSavedKnowledge({ repoRoot, env, messageId, index, setFields = appSetFields }) {
   if (
     typeof messageId !== "string" ||
     !messageId.trim() ||

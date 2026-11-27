@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { npmCommand } from "./lib/npm-invocation.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -33,6 +34,13 @@ export function checkInstalledOutput({ version, expectedVersion, help }) {
   return problems;
 }
 
+// execFileSync("npm") fails on Windows (npm.cmd needs a shell), so every npm call
+// goes through npmCommand, which needs this script started via `npm run`.
+function runNpm(args, options) {
+  const { file, args: npmArgs } = npmCommand(args);
+  return execFileSync(file, npmArgs, options);
+}
+
 function cleanEnv() {
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
@@ -51,7 +59,7 @@ export function runPackedInstallSmoke({ log = console.log } = {}) {
     const tarball = join(
       packDir,
       packedFilename(
-        execFileSync("npm", ["pack", "--json", "--ignore-scripts", "--pack-destination", packDir], {
+        runNpm(["pack", "--json", "--ignore-scripts", "--pack-destination", packDir], {
           cwd: root,
           env,
           encoding: "utf8",
@@ -66,11 +74,11 @@ export function runPackedInstallSmoke({ log = console.log } = {}) {
     );
     // --ignore-scripts matches the repo's install posture: dependency lifecycle
     // scripts are reviewed separately (check-install-scripts), not run here.
-    execFileSync(
-      "npm",
-      ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
-      { cwd: project, env, stdio: ["ignore", "inherit", "inherit"] }
-    );
+    runNpm(["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+      cwd: project,
+      env,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
     const bin = join(project, "node_modules", "careerrat", "bin", "careerrat.mjs");
     const run = (arg) =>
       execFileSync(process.execPath, [bin, arg], {

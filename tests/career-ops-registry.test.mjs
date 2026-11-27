@@ -243,6 +243,30 @@ test("createContext().fetchJson honors an explicit redirect:'error' request with
   assert.equal(receivedInit.redirect, "error");
 });
 
+test("createContext().fetchResponse hands a manual 3xx back to the provider, while fetchText still throws on it", async () => {
+  const seen = [];
+  const ctx = createContext(
+    async (_url, init) => {
+      seen.push(init.redirect);
+      return new Response(null, { status: 302, headers: { location: "/next" } });
+    },
+    { resolveHost: async () => [PUBLIC_ADDRESS], dispatcherFactory: noopDispatcherFactory }
+  );
+  const res = await ctx.fetchResponse("https://public.example.test/start", { redirect: "manual" });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("location"), "/next");
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/start", { redirect: "manual" }),
+    (error) => error.status === 302 && error.location === "/next"
+  );
+  // Without redirect: "manual" a failed status still throws from fetchResponse.
+  await assert.rejects(
+    () => ctx.fetchResponse("https://public.example.test/start", { redirect: "error" }),
+    (error) => error.status === 302
+  );
+  assert.deepEqual(seen, ["manual", "manual", "error"]);
+});
+
 // fetchCareerOpsProvider's normalizeOffer maps `job.comp` (a plain string)
 // into the returned offer's comp field. Some vendored providers (ashby among
 // them) instead surface a structured `job.salary: {min, max, currency}`. The
@@ -292,4 +316,167 @@ test("fetchCareerOpsProvider leaves comp empty when there is neither a comp stri
   );
 
   assert.equal(offers[0].comp, "");
+});
+
+// Response-size limits: the context fetchers used to call response.text(), so a
+// provider's maxBytes was ignored and the whole body was buffered.
+const SIZE_SEAMS = {
+  resolveHost: async () => [PUBLIC_ADDRESS],
+  dispatcherFactory: () => ({ close: async () => {} }),
+};
+
+function endlessResponse(counter) {
+  const chunk = new Uint8Array(1024 * 1024).fill(97);
+  return new Response(
+    new ReadableStream({
+      pull(controller) {
+        counter.pulls += 1;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        counter.cancelled = true;
+      },
+    }),
+    { status: 200 }
+  );
+}
+
+test("createContext().fetchText enforces a per-request maxBytes and throws response_too_large", async () => {
+  const ctx = createContext(async () => new Response("abcdefgh", { status: 200 }), SIZE_SEAMS);
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/feed", { maxBytes: 1 }),
+    (error) => error.code === "response_too_large"
+  );
+  assert.equal(
+    await ctx.fetchText("https://public.example.test/feed", { maxBytes: 8 }),
+    "abcdefgh"
+  );
+});
+
+test("createContext().fetchJson and fetchResponse honor maxBytes too", async () => {
+  const ctx = createContext(async () => new Response('{"a":1}', { status: 200 }), SIZE_SEAMS);
+  await assert.rejects(
+    () => ctx.fetchJson("https://public.example.test/api", { maxBytes: 3 }),
+    (error) => error.code === "response_too_large"
+  );
+  await assert.rejects(
+    () => ctx.fetchResponse("https://public.example.test/api", { maxBytes: 3 }),
+    (error) => error.code === "response_too_large"
+  );
+  assert.deepEqual(await ctx.fetchJson("https://public.example.test/api", { maxBytes: 64 }), {
+    a: 1,
+  });
+});
+
+test("createContext() applies a default ceiling and cancels the body at the limit instead of buffering it", async () => {
+  const counter = { pulls: 0, cancelled: false };
+  const ctx = createContext(async () => endlessResponse(counter), SIZE_SEAMS);
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/huge"),
+    (error) => error.code === "response_too_large"
+  );
+  assert.equal(counter.cancelled, true);
+  assert.ok(counter.pulls < 64, `read ${counter.pulls} chunks past the default ceiling`);
+});
+
+test("createContext() rejects on a declared content-length over maxBytes without reading the body", async () => {
+  const counter = { pulls: 0, cancelled: false };
+  const ctx = createContext(async () => {
+    const res = endlessResponse(counter);
+    return new Response(res.body, { status: 200, headers: { "content-length": "999999999" } });
+  }, SIZE_SEAMS);
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/huge", { maxBytes: 1024 }),
+    (error) => error.code === "response_too_large"
+  );
+  assert.equal(counter.cancelled, true);
+});
+
+test("an oversized error body keeps its first 64 KiB of text and cancels the rest", async () => {
+  const counter = { pulls: 0, cancelled: false };
+  const marker = "Service is down for maintenance";
+  const head = new TextEncoder().encode(marker);
+  const chunk = new Uint8Array(1024 * 1024).fill(97);
+  const ctx = createContext(
+    async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            counter.pulls += 1;
+            controller.enqueue(counter.pulls === 1 ? head : chunk);
+          },
+          cancel() {
+            counter.cancelled = true;
+          },
+        }),
+        { status: 503 }
+      ),
+    SIZE_SEAMS
+  );
+  const error = await ctx.fetchText("https://public.example.test/down").catch((e) => e);
+  assert.equal(error.status, 503);
+  assert.ok(error.body.startsWith(marker), "diagnostic text was discarded");
+  assert.equal(Buffer.byteLength(error.body, "utf8"), 64 * 1024);
+  assert.equal(counter.cancelled, true);
+  assert.ok(counter.pulls < 8);
+});
+
+test("a content-encoded response is judged on its decoded size, not Content-Length", async () => {
+  const ctx = createContext(
+    async () =>
+      new Response("abcdefgh", {
+        status: 200,
+        headers: { "content-length": "999999", "content-encoding": "gzip" },
+      }),
+    SIZE_SEAMS
+  );
+  assert.equal(await ctx.fetchText("https://public.example.test/z", { maxBytes: 64 }), "abcdefgh");
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/z", { maxBytes: 4 }),
+    (error) => error.code === "response_too_large"
+  );
+});
+
+test("an identity-encoded Content-Length over maxBytes still short-circuits", async () => {
+  const ctx = createContext(
+    async () =>
+      new Response("abc", {
+        status: 200,
+        headers: { "content-length": "999999", "content-encoding": "identity" },
+      }),
+    SIZE_SEAMS
+  );
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/z", { maxBytes: 64 }),
+    (error) => error.code === "response_too_large"
+  );
+});
+
+test("an Ashby body over its cap falls back to the embed listing instead of being parsed whole", async () => {
+  const embedHtml = `<script>window.__appData = ${JSON.stringify({
+    jobBoard: {
+      jobPostings: [{ id: "p1", title: "Embed Engineer", locationName: "Remote" }],
+    },
+  })};</script>`;
+  let calls = 0;
+  const offers = await fetchCareerOpsProvider(
+    "ashby",
+    { name: "Acme", careers_url: "https://jobs.ashbyhq.com/acme" },
+    {
+      fetchImpl: async (url) => {
+        calls += 1;
+        if (String(url).includes("posting-api")) {
+          return new Response("x".repeat(1024), {
+            status: 200,
+            headers: { "content-length": String(65 * 1024 * 1024) },
+          });
+        }
+        return new Response(embedHtml, { status: 200 });
+      },
+      ...SIZE_SEAMS,
+    }
+  ).catch((error) => error);
+  assert.ok(calls >= 2, "the embed fallback never ran");
+  assert.ok(Array.isArray(offers), String(offers?.message));
+  assert.equal(offers[0]?.title, "Embed Engineer");
 });

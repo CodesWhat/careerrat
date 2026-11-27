@@ -5,9 +5,13 @@
 # dismiss stale reviews on push, code-owner review, last-push approval, block force-push,
 # block deletion, no bypass for anyone.
 #
-# required_status_checks includes the deterministic web, docs, Windows package,
-# and real-Chromium application-preparation gates alongside the core/security
-# suite. Contexts are
+# required_status_checks includes the web-build, windows-package-smoke and
+# browser-application-prep contexts alongside the core/security suite. Those
+# three names predate the npm-only product and are kept because the ruleset
+# requires them: web-build runs the packed npm install smoke,
+# windows-package-smoke runs the [win32] tests plus that smoke on Windows, and
+# browser-application-prep runs the real-Chromium application-preparation
+# tests. Contexts are
 # JOB names, not workflow file names, so renaming a workflow file does not change
 # them. Two PR checks are deliberately NOT required because they fail for reasons
 # unrelated to the code: `qlty check` (Qlty Cloud minutes, distinct from the in-repo

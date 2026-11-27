@@ -57,6 +57,50 @@ test("a stored --query reaches providers that read searchKeywords", async () => 
   assert.match(bodies[0], /"SearchTerm":"data analyst"/);
 });
 
+for (const providerId of ["gupy", "jobscz", "platsbanken", "pracecz"]) {
+  test(`a stored --query reaches ${providerId}'s provider-specific keyword config`, async () => {
+    const requests = [];
+    let failure = null;
+    await fetchCareerOpsProvider(
+      providerId,
+      { name: `${providerId} board`, provider: providerId, query: "dataanalytiker" },
+      {
+        resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+        fetchImpl: async (url, init = {}) => {
+          requests.push(`${url} ${String(init.body || "")}`);
+          return new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }
+    ).catch((error) => {
+      failure = error;
+    });
+    assert.ok(!/no .*keywords/.test(failure?.message || ""), failure?.message);
+    assert.ok(requests.length > 0, "provider should have made a request");
+    assert.match(requests[0], /dataanalytiker/);
+  });
+}
+
+test("an explicit provider keyword config wins over a stored --query", async () => {
+  const requests = [];
+  await fetchCareerOpsProvider(
+    "jobscz",
+    { name: "jobs.cz", provider: "jobscz", query: "ignored", jobscz: { keywords: ["tester"] } },
+    {
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (url) => {
+        requests.push(String(url));
+        return new Response("<html></html>", { status: 200 });
+      },
+    }
+  ).catch(() => {});
+  assert.ok(requests.length > 0);
+  assert.match(requests[0], /tester/);
+  assert.doesNotMatch(requests[0], /ignored/);
+});
+
 test("an acknowledged max_pages cap is a notice, not a warning", async () => {
   const { splitAcknowledgedCapNotices } = await import(
     "../src/core/providers/career-ops-registry.mjs"

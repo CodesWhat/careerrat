@@ -1,6 +1,6 @@
 // call-ai.mjs — the one seam every skill calls through to reach a model.
 //
-// All candidate state stays local. In the desktop/app runtime, the primary AI
+// All candidate state stays local. The primary AI
 // route is a supported CLI already installed and authenticated on this
 // computer; CareerRat invokes that executable with fixed argv and never copies
 // its credentials. Provider routes remain explicit Advanced fallbacks.
@@ -64,21 +64,10 @@ export function resolveAIRoute(
     runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   } = {}
 ) {
-  const desktopCliOnly = env.CAREERRAT_DESKTOP_CLI_ONLY === "1";
   if (repoRoot) {
     const selection = loadInstalledRuntimeSelection({ repoRoot, env });
     const installedRuntimeEnabled =
-      selection.runtimeId !== null ||
-      env.CAREERRAT_DESKTOP_SHELL === "1" ||
-      env.CAREERRAT_INSTALLED_AI === "1";
-    if (desktopCliOnly && (selection.providerFallback || !selection.runtimeId)) {
-      return {
-        type: "none",
-        error:
-          "Select a ready installed AI CLI in Settings. Packaged CareerRat does not use " +
-          "provider or SDK fallback.",
-      };
-    }
+      selection.runtimeId !== null || env.CAREERRAT_INSTALLED_AI === "1";
     if (installedRuntimeEnabled && !selection.providerFallback) {
       const inventory = runtimeInventory || detectInstalledRuntimes({ env });
       const runtime = selection.runtimeId
@@ -133,15 +122,6 @@ export function resolveAIRoute(
         };
       }
     }
-  }
-
-  if (desktopCliOnly) {
-    return {
-      type: "none",
-      error:
-        "Select a ready installed AI CLI in Settings. Packaged CareerRat does not use " +
-        "provider or SDK fallback.",
-    };
   }
 
   const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();

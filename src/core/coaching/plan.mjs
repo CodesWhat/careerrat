@@ -7,8 +7,8 @@
 // own output), plus the confirmed evidence bank and JD context
 // buildPacketContext already assembles for packet generation.
 //
-// Trigger contract (owned by the caller, src/core/agent/workspace-agent.mjs's
-// coaching.plan intent — this module does not re-derive it): gate === "review"
+// Trigger contract (owned by the caller (the coach-gaps skill) — this module does
+// not re-derive it): gate === "review"
 // with a non-empty fitRisks[]. Never fires on "cut" (nothing to coach toward)
 // or "keep" (no named gap to close).
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";

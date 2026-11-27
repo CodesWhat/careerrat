@@ -1,9 +1,9 @@
 ---
 title: Skills Catalog
-description: All 28 skills and what each one does.
+description: All 26 skills and what each one does.
 ---
 
-CareerRat ships 28 skills under `.agents/skills/`. Each is a `SKILL.md` file, a
+CareerRat ships 26 skills under `.agents/skills/`. Each is a `SKILL.md` file, a
 detailed, executable procedure the agent follows when routed to that skill. Skills
 are field-neutral: the same skill serves any candidate because it reads your
 private config, not hardcoded preferences.
@@ -20,13 +20,6 @@ private config, not hardcoded preferences.
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
 | `apply-job` | End-to-end job application workflow: gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (LinkedIn jobs go to the employer's own link, or wait for you), submits when complete and verified (or stops for you after `careerrat automation submit manual --write`), verifies the outcome, and updates the tracker. |
 | `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. Runs on its own when a review verdict lands. |
-
-## Intake extraction
-
-| Skill | Description |
-| ------- | ----------- |
-| `intake-extract` | Backend-only verbatim transcription for PDF and image uploads sent through Universal Intake. It does not summarize, classify, or make candidate-specific assumptions. |
-| `resume-extract` | Backend-only structured extraction for PDF, image, and converted DOCX résumés. It emits the onboarding profile and targeting draft without inventing facts. |
 
 ## Research loop
 

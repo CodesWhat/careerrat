@@ -9,7 +9,7 @@
 // a summary — optionally capturing kept JDs and persisting Jobs-visible sourced
 // rows in DB workspaces. No AI model is ever called.
 //
-// src/cli/search-route.mjs calls the exported runSourcedScan() in-process for
+// the retired search route calls the exported runSourcedScan() in-process for
 // POST /api/search/scan. CLI flag parsing and output formatting remain behind
 // the import.meta.url entry guard, so imports never touch process.argv.
 //
@@ -517,7 +517,7 @@ function emptySeenContext() {
 }
 
 // ---------------------------------------------------------------------------
-// runSourcedScan — the orchestration, importable. src/cli/search-route.mjs
+// runSourcedScan — the orchestration, importable. the retired search route
 // calls this in-process for POST /api/search/scan; main() below is just the
 // CLI's argument-parsing + output-formatting wrapper around the same call.
 //

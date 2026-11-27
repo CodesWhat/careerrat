@@ -1,7 +1,54 @@
 # Career Ops provider conformance snapshot
 
 These provider contract tests come from `career-ops-hq/career-ops` commit
-`8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40` under its MIT license.
+`13786939dc79e0ec324b5571c9e6f29c50d43b53` under its MIT license. The provider
+fixtures below are still adapted from the earlier `8a20e491` snapshot until the
+CR70 slices that re-adapt them land.
+
+CR70 slice 0 (2026-11-27) added `helpers/`: upstream's suites for the shared
+helpers that have no provider id (`_html-to-text`, `_html-entities`,
+`_cached-lookup`, `_country`, `_employment-type`, `_safe-url`), adapted the
+same way and run by `tests/career-ops-helpers.test.mjs`. The `_html-to-text`
+fixture passes `{ cap: DESCRIPTION_CAP }` where upstream relies on the default,
+because CareerRat bounds a bare `htmlToText()` by `DESCRIPTION_MAX_BYTES`.
+Skipped, with the helpers they cover not vendored: `_http*`, `_dns-*`,
+`_ip-guard` and the other shared-behavior suites named in the CR70 plan.
+
+CR70 slice 1: the fixtures for a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 2: the fixtures for bamboohr, beesite, breezy, builtin, careerviet, comeet, cryptocurrencyjobs, csod, dassault, deutschebahn, echojobs, eightfold were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 3: the fixtures for feishu-jobs, garena, gem, getro, glints, hecklerkoch, higheredjobs, himalayas, ibm, icims were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 4: the fixtures for itviec, jibeapply, jobbankca, jobicy, jobspresso, jobstreet, jobvite, join were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 5: the fixtures for justjoin, landingjobs, larajobs, lever, manfred, mokahr, mycareersfuture, nodesk, oraclecloud, personio were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 6: the fixtures for phenom, pinpoint, radancy, remoteok, remotive, remotli, rheinmetall, rippling, senjob, softgarden were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 7: the fixtures for tencent, thehub, themuse, tkms, torre were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 8: the fixtures for vdab, weworkremotely, workingnomads, wttj, yourator were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 9: the fixtures for greenhouse and workday were regenerated from upstream's `13786939` suites with the same adaptation. greenhouse keeps the local full-description and `descriptionPartial` cases in place of upstream's 4000-character cap case; workday keeps the case-insensitive cap-advice regex for the re-punctuated warning.
+
+CR70 slice 10: the fixtures for ashby, consider and recruitee were regenerated from upstream's `13786939` suites. ashby drops the `liveness-api.mjs` and `verify-portals.mjs` cases (not vendored) and keeps the local `summaryComponents` and permanent-versus-transient retry cases; consider drops the `_ip-guard` case and keeps the local `createContext` private-address case; recruitee keeps a local `descriptionPartial` case.
+
+CR70 slice 11: the fixtures for smartrecruiters, meituan and alibaba were regenerated from upstream's `13786939` suites. smartrecruiters drops the `scan.mjs` age-filter and dedup cases; all three keep a local case that a description past the byte cap sets `descriptionPartial`.
+
+CR70 slice 12: new fixtures for atlassian, factorial, hiringroom, generalist-world, germantechjobs, startup-jobs, pythonorg, prevueaps, hibob, inhire, remote-com, applitrack, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 13: new fixtures for aldi-nord, apple, bwi, bulldogjob, deel, bolt, dover, paylocity, polymer, redrover, notion, jazzhr, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 14: new fixtures for bizneo, computrabajo, goldman, google, hirehive, itjobs, magneto, neogov, occ, paycom, schoolspring, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 15: new fixtures for pracecz, platsbanken, jobscz, kalibrr, techinasia, kariyer, kula, rexx, tes, velorahr, trakstar, keka, homerun, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 16: new fixtures for adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 17: new fixtures for gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager (plus a regenerated successfactors fixture; the peoplesoft sample page says "Graduate degree" where upstream says a banned word, so the repo's inclusive-language test passes), adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 leftovers: the fixtures for teamtailor, workable and hackernews were regenerated from upstream's `13786939` suites. workable drops the `scan.mjs` `buildLocationFilter` and dedup cases (`isOfferSeen`, `markOfferSeen`, `listingIdentityToken`) and keeps a direct board_slug check; `tests/career-ops-lib.test.mjs` covers the new `fetchTextStream` and `resolveDefaultTimeoutMs` shim exports and `ats-vendor.mjs`.
 
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two

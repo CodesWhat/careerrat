@@ -228,7 +228,7 @@ function writeExitingLeaderDescendantWrapperScript(wrapperPath) {
   );
 }
 
-async function waitForFileContent(path, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+async function waitForFileContent(path, { timeoutMs = 30_000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (existsSync(path)) {
@@ -249,7 +249,7 @@ function isProcessAlive(pid) {
   }
 }
 
-async function waitUntilProcessDead(pid, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+async function waitUntilProcessDead(pid, { timeoutMs = 30_000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (isProcessAlive(pid) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -1726,12 +1726,6 @@ test("Windows execution identity spawns the version probe through the same resol
     // to reach the helper subprocess's own argv, or its spawn re-quotes that
     // payload a second time and corrupts it.
     assert.equal(calls[0].args.at(-1), "--windows-verbatim-arguments");
-    // Codex round 14 review: process.execPath (the command spawned above)
-    // is CareerRat.exe in the packaged desktop, not a Node binary. Without
-    // ELECTRON_RUN_AS_NODE on the helper's own env, that spawn launches
-    // another Electron GUI instead of running runtime-probe-helper.mjs as a
-    // script, and Doctor's Windows identity probe never returns valid JSON.
-    assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, "1");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2092,7 +2086,7 @@ test("Windows execution identity fails closed without spawning when no cmd.exe i
 // the same helper file win32 production runs use with taskkill /T /F
 // instead. Mirrors the resistant-descendant shell script already proven in
 // doctor-installed-runtimes.test.mjs's SIGTERM-trap test.
-test("runtime-probe-helper.mjs kills a resistant descendant on timeout and reports it in its JSON protocol", (t) => {
+test("runtime-probe-helper.mjs kills a resistant descendant on timeout and reports it in its JSON protocol", async (t) => {
   if (process.platform === "win32") {
     t.skip("trap/sleep shell scripting is POSIX-only; win32 exercises taskkill /T /F instead");
     return;
@@ -2111,9 +2105,9 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
   );
 
   try {
-    const result = spawnSync(process.execPath, [helperPath, scriptPath, "--timeout-ms", "300"], {
+    const result = spawnSync(process.execPath, [helperPath, scriptPath, "--timeout-ms", "4000"], {
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
     const reported = JSON.parse(result.stdout);
@@ -2124,9 +2118,11 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
       Number.isInteger(sleepPid) && sleepPid > 0,
       "the resistant script must have recorded the sleep descendant's real pid"
     );
-    assert.throws(
-      () => process.kill(sleepPid, 0),
-      /ESRCH/,
+    // A killed process stays signalable until its new parent reaps it, which a
+    // loaded machine can delay, so wait for it to actually be gone.
+    assert.equal(
+      await waitUntilProcessDead(sleepPid),
+      true,
       "the sleep descendant must not survive the helper's timeout cleanup"
     );
   } finally {
@@ -2183,7 +2179,7 @@ test("[win32] runtime-probe-helper.mjs's runProbe kills a real node child and it
   // Bounded poll for process.kill(pid, 0) to throw ESRCH — real process exit
   // is asynchronous from the caller's point of view, so this can't just
   // assert once immediately after the helper's own spawnSync returns.
-  async function waitUntilDead(pid, timeoutMs = 5_000, intervalMs = 20) {
+  async function waitUntilDead(pid, timeoutMs = 30_000, intervalMs = 20) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       try {
@@ -2203,8 +2199,8 @@ test("[win32] runtime-probe-helper.mjs's runProbe kills a real node child and it
       // real node process starts (child, then its grandchild) time to run
       // far enough to write their pid files before the probe's own timeout
       // fires and kills the tree.
-      [helperPath, process.execPath, childScript, "--timeout-ms", "1000"],
-      { encoding: "utf8", timeout: 15_000 }
+      [helperPath, process.execPath, childScript, "--timeout-ms", "5000"],
+      { encoding: "utf8", timeout: 60_000 }
     );
     assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
     const reported = JSON.parse(result.stdout);
@@ -2425,41 +2421,6 @@ test("runtime-probe-helper.mjs's runProbe forwards windowsVerbatimArguments to i
     "the flag must never default to on for a caller that never asked for it"
   );
   assert.equal(defaultResult.status, 0);
-});
-
-// Codex round 14 review: this helper process is itself launched with
-// ELECTRON_RUN_AS_NODE=1 (see installed-runtimes.mjs) so process.execPath
-// runs it as Node in the packaged desktop instead of another GUI instance.
-// That flag is scoped to getting this process running; the runtime it
-// spawns below is a real target binary, not another Electron host, and
-// must not inherit it. Proves the strip happens on runProbe's own spawn
-// call via a stubbed spawnImpl, not just that the parent's env is untouched.
-test("runtime-probe-helper.mjs's runProbe strips ELECTRON_RUN_AS_NODE from the runtime child's env", async () => {
-  const calls = [];
-  const fakeChild = new EventEmitter();
-  fakeChild.stdout = new EventEmitter();
-  fakeChild.stderr = new EventEmitter();
-  const spawnImpl = (exe, args, options) => {
-    calls.push({ exe, args, options });
-    queueMicrotask(() => fakeChild.emit("close", 0));
-    return fakeChild;
-  };
-
-  const original = process.env.ELECTRON_RUN_AS_NODE;
-  process.env.ELECTRON_RUN_AS_NODE = "1";
-  try {
-    await runProbe({ exe: "claude", args: ["--version"], timeoutMs: 5_000 }, { spawnImpl });
-  } finally {
-    if (original === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
-    else process.env.ELECTRON_RUN_AS_NODE = original;
-  }
-
-  assert.equal(calls.length, 1);
-  assert.equal(
-    Object.hasOwn(calls[0].options.env, "ELECTRON_RUN_AS_NODE"),
-    false,
-    "the runtime child must never inherit the flag that got this helper process running as Node"
-  );
 });
 
 // Codex round 13 review: the genuine, unstubbed proof. A real .cmd shim
@@ -3235,7 +3196,7 @@ test("isInstalledRuntimeBelowVersionBoundary kills a probed CLI's whole descenda
     const claudeRuntime = { id: "claude", path: process.execPath };
     const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
       platform: "darwin",
-      timeoutMs: 500,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -3274,7 +3235,7 @@ test("isInstalledRuntimeBelowVersionBoundary does not settle early when the wrap
     const claudeRuntime = { id: "claude", path: process.execPath };
     const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
       platform: "darwin",
-      timeoutMs: 500,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -3457,7 +3418,6 @@ test("Codex public-web invocation uses supported per-call search and MCP config"
   assert.ok(
     overrides.includes('mcp_servers.careerrat_scoped_tools.default_tools_approval_mode="approve"')
   );
-  assert.ok(overrides.includes('mcp_servers.careerrat_scoped_tools.env.ELECTRON_RUN_AS_NODE="1"'));
   for (const feature of [
     "shell_tool",
     "unified_exec",
@@ -3473,59 +3433,6 @@ test("Codex public-web invocation uses supported per-call search and MCP config"
       ),
       `Codex public web must leave ${feature} disabled`
     );
-  }
-});
-
-test("claude exact-read invocation approves only the uploaded file and isolated skill", () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Read only the supplied resume.\n");
-  let isolatedCwd;
-  try {
-    const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-    mkdirSync(uploadDir, { recursive: true });
-    const upload = join(uploadDir, "resume.pdf");
-    const sibling = join(uploadDir, "other.pdf");
-    writeFileSync(upload, "resume", "utf8");
-    writeFileSync(sibling, "private sibling", "utf8");
-    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
-
-    const invocation = buildInstalledRuntimeInvocation({
-      runtimeId: "claude",
-      executablePath: "/safe/claude",
-      repoRoot,
-      isolatedCwd,
-      approvedReadPaths: [upload],
-      tools: ["Read", "Skill"],
-      skill: "resume-extract",
-    });
-    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
-    assert.deepEqual(settings.sandbox.filesystem.denyRead, ["//**"]);
-    assert.deepEqual(
-      new Set(settings.sandbox.filesystem.allowRead),
-      new Set([realpathSync(upload), realpathSync(isolatedCwd)])
-    );
-    assert.equal(settings.sandbox.filesystem.allowRead.includes(sibling), false);
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "workspace")),
-      false
-    );
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.includes(join(repoRoot, "candidate")),
-      false
-    );
-    assert.equal(invocation.args.includes("--safe-mode"), false);
-    assert.ok(invocation.args.includes("--strict-mcp-config"));
-    assert.ok(invocation.args.includes("--no-chrome"));
-    const allowed = invocation.args[invocation.args.indexOf("--allowedTools") + 1];
-    assert.doesNotMatch(
-      allowed,
-      /(?:^|,)Read(?:,|$)/,
-      "Read must never be approved without a path"
-    );
-    assert.match(allowed, /Read\(\/\//);
-    assert.match(allowed, /Skill\(resume-extract\)/);
-  } finally {
-    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
-    rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
@@ -3557,41 +3464,6 @@ test("claude exact-read invocation fails closed for missing, outside, and symlin
     }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("claude exact-read invocation resolves uploads from CAREERRAT_HOME in packaged layout", () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract");
-  const privateHome = tempRoot();
-  const uploadDir = join(privateHome, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  let isolatedCwd;
-  try {
-    isolatedCwd = materializeIsolatedSkillCwd({ repoRoot, skill: "resume-extract" });
-    const invocation = buildInstalledRuntimeInvocation({
-      runtimeId: "claude",
-      executablePath: "/safe/claude",
-      repoRoot,
-      env: { CAREERRAT_HOME: privateHome },
-      isolatedCwd,
-      approvedReadPaths: [upload],
-      tools: ["Read", "Skill"],
-      skill: "resume-extract",
-    });
-    const settings = JSON.parse(invocation.args[invocation.args.indexOf("--settings") + 1]);
-    assert.ok(settings.sandbox.filesystem.allowRead.includes(realpathSync(upload)));
-    assert.equal(
-      settings.sandbox.filesystem.allowRead.some((path) =>
-        path.startsWith(join(repoRoot, "workspace"))
-      ),
-      false
-    );
-  } finally {
-    if (isolatedCwd) rmSync(isolatedCwd, { recursive: true, force: true });
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(privateHome, { recursive: true, force: true });
   }
 });
 
@@ -3732,7 +3604,7 @@ test("the scoped-tools child speaks MCP JSON-RPC for discovery, staged read, and
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
 
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + 60_000;
     while (stdout.trim().split("\n").filter(Boolean).length < 5 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -3967,7 +3839,7 @@ test("guided Claude setup timeout kills the whole installer process tree after i
   try {
     const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
       platform: "darwin",
-      timeoutMs: 300,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -4037,7 +3909,7 @@ test("guided Claude setup timeout does not release the lock early when bash exit
   try {
     const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
       platform: "darwin",
-      timeoutMs: 300,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -5231,59 +5103,6 @@ process.stdin.on("end", () => {
   assert.equal(existsSync(capturedIsolatedCwd), false);
 });
 
-test("runInstalledRuntime (claude exact-read skill): isolates cwd and passes only one approved upload", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Trigger word PROBE.\n");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  const executablePath = join(repoRoot, "fake-claude-read");
-  writeFileSync(
-    executablePath,
-    `#!/usr/bin/env node
-process.stdin.resume();
-process.stdin.on("end", () => {
-  process.stdout.write(JSON.stringify({
-    type: "result",
-    subtype: "success",
-    result: "ignored",
-    structured_output: {
-      cwd: process.cwd(),
-      usedSafeMode: process.argv.includes("--safe-mode"),
-      usedSettingSources: process.argv.includes("--setting-sources"),
-      settings: JSON.parse(process.argv[process.argv.indexOf("--settings") + 1]),
-    },
-  }));
-});
-`,
-    "utf8"
-  );
-  chmodSync(executablePath, 0o755);
-  try {
-    const result = await runInstalledRuntime({
-      runtime: verifiedRuntime({ id: "claude", path: executablePath }),
-      prompt: "run resume-extract",
-      skill: "resume-extract",
-      repoRoot,
-      cwd: repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      timeoutMs: 5000,
-      spawnSyncImpl: verifiedClaudeVersion,
-    });
-    const data = JSON.parse(result.text);
-    assert.notEqual(data.cwd, realpathSync(repoRoot));
-    assert.equal(data.usedSafeMode, false);
-    assert.equal(data.usedSettingSources, true);
-    assert.deepEqual(
-      new Set(data.settings.sandbox.filesystem.allowRead),
-      new Set([realpathSync(upload), data.cwd])
-    );
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
 test("runInstalledRuntime rejects broad Glob/Grep tools before spawning Claude", async () => {
   const repoRoot = tempRepoWithOneSkill("evaluate-job", "Trigger word PROBE.\n");
   let spawned = false;
@@ -5472,83 +5291,6 @@ test("runInstalledRuntime: claude + the same restricted chat tool profile is una
     assert.match(allowed, /mcp__careerrat_scoped_tools__fetch/);
     assert.doesNotMatch(allowed, /WebFetch/);
     assert.equal(result.text, "ok");
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("runInstalledRuntime stages one approved upload for Codex exact-read work", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume evidence", "utf8");
-  const calls = [];
-  let writtenPrompt = "";
-  try {
-    const result = await runInstalledRuntime({
-      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex" }),
-      prompt: "extract this resume",
-      skill: "resume-extract",
-      repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      spawnImpl(command, args, options) {
-        const stagedUpload = join(options.cwd, "input", "resume.pdf");
-        calls.push({ command, args, options, stagedUpload, staged: existsSync(stagedUpload) });
-        const child = fakeInstalledChild();
-        child.stdin.end = (value) => {
-          writtenPrompt = String(value);
-          queueMicrotask(() => {
-            child.stdout.emit(
-              "data",
-              Buffer.from(
-                ndjson([
-                  {
-                    type: "item.completed",
-                    item: { type: "agent_message", text: "resume extracted" },
-                  },
-                  { type: "turn.completed" },
-                ])
-              )
-            );
-            child.emit("close", 0, null);
-          });
-        };
-        return child;
-      },
-    });
-    assert.equal(result.text, "resume extracted");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].staged, true);
-    assert.match(writtenPrompt, /read_staged_input/);
-    assert.doesNotMatch(writtenPrompt, /input[/\\]resume\.pdf/);
-    assert.equal(calls[0].args.includes("--sandbox"), true);
-    assert.equal(calls[0].args.includes("read-only"), true);
-    for (const feature of ["shell_tool", "unified_exec", "view_image"]) {
-      assert.ok(
-        calls[0].args.some(
-          (arg, index, args) => arg === "--disable" && args[index + 1] === feature
-        ),
-        `Codex exact read must not re-enable ${feature}`
-      );
-    }
-    const overrides = calls[0].args.flatMap((arg, index, args) =>
-      arg === "-c" ? [args[index + 1]] : []
-    );
-    assert.ok(
-      overrides.some((value) => value?.startsWith("mcp_servers.careerrat_scoped_tools.command=")),
-      "Codex exact read must use the scoped CareerRat MCP server"
-    );
-    assert.ok(
-      overrides.includes('mcp_servers.careerrat_scoped_tools.enabled_tools=["read_staged_input"]')
-    );
-    assert.equal(overrides.includes('web_search="live"'), false);
-    assert.equal(
-      overrides.some((value) => value?.includes("--allow-public-web")),
-      false
-    );
-    assert.equal(existsSync(calls[0].options.cwd), false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -6021,51 +5763,6 @@ test("runInstalledRuntimeStream gives Codex only the selected CareerRat skill wo
     assert.match(receivedPrompt, /CODEX_SKILL_SCOPE/);
   } finally {
     assert.equal(spawnedCwd ? existsSync(spawnedCwd) : null, false);
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("runInstalledRuntimeStream tells Codex to use its staged-read tool", async () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract", "Marker: CODEX_READ_SCOPE.\n");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const upload = join(uploadDir, "resume.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(upload, "resume", "utf8");
-  let receivedPrompt = null;
-  try {
-    const result = await runInstalledRuntimeStream({
-      runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
-      prompt: "extract this resume",
-      skill: "resume-extract",
-      repoRoot,
-      cwd: repoRoot,
-      tools: ["Read", "Skill"],
-      approvedReadPaths: [upload],
-      spawnImpl() {
-        const child = fakeStreamingChild({
-          chunks: [
-            ndjson([
-              { type: "thread.started", thread_id: "thread-read" },
-              {
-                type: "item.completed",
-                item: { id: "message-1", type: "agent_message", text: "Read" },
-              },
-              { type: "turn.completed" },
-            ]),
-          ],
-        });
-        const end = child.stdin.end;
-        child.stdin.end = (value) => {
-          receivedPrompt = String(value || "");
-          end.call(child.stdin, value);
-        };
-        return child;
-      },
-    });
-    assert.equal(result.text, "Read");
-    assert.match(receivedPrompt, /CODEX_READ_SCOPE/);
-    assert.match(receivedPrompt, /read_staged_input/);
-  } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });

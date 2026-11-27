@@ -2,7 +2,7 @@ node_modules/
 .env
 .env.local
 
-# Local throwaway demo workspace seeded by scripts/demo-serve.sh
+# Local throwaway demo workspace seeded by scripts/seed-demo.mjs
 # (CAREERRAT_HOME=./.demo-home) — never real data, never checked in.
 .demo-home/
 
@@ -12,17 +12,6 @@ node_modules/
 # qlty config (track qlty.toml, ignore the CLI's local cache/output symlinks)
 .qlty/*
 !.qlty/qlty.toml
-
-# apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
-# package.json#files["apps/web/dist"], same "gitignored generated release
-# artifact" pattern as the Next app outputs above.
-apps/web/dist/
-
-# apps/desktop build artifacts. staging/ (scripts/stage.mjs's extraResources
-# tree) needs an explicit ignore; apps/desktop/dist/ and apps/desktop/
-# node_modules/ are already covered by the bare `dist/` and `node_modules/`
-# patterns above (no path prefix = match at any depth).
-apps/desktop/staging/
 
 # build:demo static bundle (rebuilt per deploy so dates stay evergreen)
 dist/
@@ -87,8 +76,8 @@ docs/COMPARISON.md
 # Consolidated local user data root (candidate/workspace/generated config/internal).
 .careerrat/
 
-# Alternate CAREERRAT_HOME used by `npm run desktop:fresh` to boot the desktop
-# app against a clean data root (fresh onboarding / fresh-db smoke tests)
+# Alternate CAREERRAT_HOME used by a desktop build to boot the app
+# against a clean data root (fresh onboarding / fresh-db smoke tests)
 # without touching the real .careerrat/ data root.
 #
 # Match ANY *-fresh data root, not just the current product name. A stale

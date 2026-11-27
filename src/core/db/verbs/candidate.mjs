@@ -1080,6 +1080,7 @@ export function candidateEvidenceMerge({
   claims,
   recordActivity = true,
   onWrite,
+  guard,
 } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
@@ -1089,9 +1090,19 @@ export function candidateEvidenceMerge({
   assertCleanEvidenceClaims(claims);
   if (onWrite !== undefined && typeof onWrite !== "function")
     throw new TypeError("onWrite must be a synchronous function");
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
   return runVerb(
     { repoRoot, env },
-    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity, onWrite }),
+    (db) => {
+      // Checked inside the write transaction, against the claims as stored now.
+      if (guard && !guard(readEvidence(db).claims)) {
+        const err = new Error("evidence changed since it was read");
+        err.code = "CONFLICT";
+        throw err;
+      }
+      return mergeEvidenceClaimsInDb(db, { claims, recordActivity, onWrite });
+    },
     { requireExistingTracker: true }
   );
 }
@@ -1205,19 +1216,26 @@ function nextClaimId(usedIds) {
 // new verb: unlike candidateEvidenceMerge (upsert-by-id), this is a pure
 // remove — a clean NOT_FOUND on an unknown id rather than a silent no-op,
 // so the Library drawer's Delete affordance can surface a real error.
-export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
+export function candidateEvidenceRemoveOne({ repoRoot, env, id, guard } = {}) {
   const claimId = String(id || "").trim();
   if (!claimId) {
     const err = new Error("candidateEvidenceRemoveOne requires id");
     err.code = "BAD_REQUEST";
     throw err;
   }
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
   return runVerb(
     { repoRoot, env },
     (db) => {
       const existing = db
         .prepare("SELECT data FROM candidate_evidence_claims WHERE id = ?")
         .get(claimId);
+      if (guard && !guard(existing ? JSON.parse(existing.data) : undefined)) {
+        const err = new Error("evidence changed since it was read");
+        err.code = "CONFLICT";
+        throw err;
+      }
       if (!existing) {
         const err = new Error(`evidence claim not found: "${claimId}"`);
         err.code = "NOT_FOUND";

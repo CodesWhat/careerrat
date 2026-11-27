@@ -77,7 +77,7 @@ function writeItem(db, id, item, updatedAt) {
 // (AGENTS.md's Paste Intake rule) is visible outside a database file. File
 // drops (a screenshot, a PDF) are NOT written here — those already have their
 // own on-disk copy via whatever route saved them (mirrors
-// src/cli/onboard-route.mjs's resume-ai upload convention), referenced via
+// the retired onboard route's resume-ai upload convention), referenced via
 // `sourceFilePath` instead.
 function writeRawCapture({ repoRoot, env, id, inputKind, rawInput, capturedAt }) {
   if (inputKind === "file") return null;

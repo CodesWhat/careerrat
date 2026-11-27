@@ -9,6 +9,11 @@ const MAX_TIMEOUT_MS = 60_000;
 const DEFAULT_USER_AGENT =
   "CareerRat/0.7 (+https://github.com/CodesWhat/careerrat; deterministic job source)";
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+// Same ceiling as the vendored _http.mjs fetchTextStream. A provider raises or
+// lowers it per request with `maxBytes`; an error body is never worth more
+// than a slice of it.
+const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+const ERROR_BODY_MAX_BYTES = 64 * 1024;
 
 // Vendored providers report truncation, partial pages and ignored settings with
 // console.error, which the terminal search worker discards. Route those lines
@@ -159,6 +164,17 @@ function keywordList(entry = {}) {
   ];
 }
 
+const KEYWORD_BLOCK_PROVIDERS = new Set([
+  "arbeitsagentur",
+  "vdab",
+  "jobbankca",
+  "mycareersfuture",
+  "gupy",
+  "jobscz",
+  "platsbanken",
+  "pracecz",
+]);
+
 function prepareProviderEntry(providerId, entry = {}) {
   const normalized = { ...normalizeEntry(entry), provider: providerId };
   const keywords = keywordList(normalized);
@@ -173,37 +189,91 @@ function prepareProviderEntry(providerId, entry = {}) {
       normalized.searchKeywords = keywords.join(" ");
     }
   }
-  if (providerId === "arbeitsagentur" && keywords.length > 0) {
-    normalized.arbeitsagentur = {
-      ...normalized.arbeitsagentur,
-      keywords: normalized.arbeitsagentur?.keywords || keywords,
-    };
-  }
-  if (providerId === "vdab" && keywords.length > 0) {
-    normalized.vdab = {
-      ...normalized.vdab,
-      keywords: normalized.vdab?.keywords || keywords,
-    };
-  }
-  // Same convention as arbeitsagentur/vdab above: jobbankca and
-  // mycareersfuture are also keyword-required national job-bank providers,
-  // and their vendored fallback (resolveProfileKeywords(), from the
-  // _profile-keywords.mjs shim) always returns [] locally — CareerRat keeps
-  // candidate state in its workspace database, not a filesystem
-  // config/profile.yml, so the real fallback path is here instead.
-  if (providerId === "jobbankca" && keywords.length > 0) {
-    normalized.jobbankca = {
-      ...normalized.jobbankca,
-      keywords: normalized.jobbankca?.keywords || keywords,
-    };
-  }
-  if (providerId === "mycareersfuture" && keywords.length > 0) {
-    normalized.mycareersfuture = {
-      ...normalized.mycareersfuture,
-      keywords: normalized.mycareersfuture?.keywords || keywords,
-    };
+  // The keyword-sweep providers read their keywords from a provider-specific
+  // block, never from the top-level fields the CLI writes. Same convention for
+  // every one of them: copy the stored query in when the block has none.
+  //
+  // arbeitsagentur and vdab are keyword-required national boards. jobbankca and
+  // mycareersfuture are too, and their vendored fallback
+  // (resolveProfileKeywords(), from the _profile-keywords.mjs shim) always
+  // returns [] locally, since CareerRat keeps candidate state in its workspace
+  // database, not a filesystem config/profile.yml, so the real fallback path is
+  // here. gupy, jobscz, platsbanken and pracecz sweep one request per keyword
+  // and reject an entry that carries none.
+  if (keywords.length > 0 && KEYWORD_BLOCK_PROVIDERS.has(providerId)) {
+    const block = normalized[providerId];
+    const configured = block && typeof block === "object" && !Array.isArray(block) ? block : {};
+    const hasQuery = typeof configured.q === "string" && configured.q.trim() !== "";
+    const hasKeywords = Array.isArray(configured.keywords) && configured.keywords.length > 0;
+    // gupy also accepts a single `q`; an explicit one counts as configured.
+    if (!hasKeywords && !(providerId === "gupy" && hasQuery)) {
+      normalized[providerId] = { ...configured, keywords };
+    }
   }
   return normalized;
+}
+
+function responseTooLarge(maxBytes, declared) {
+  const error = new Error(
+    `HTTP body exceeded maxBytes of ${maxBytes}${declared != null ? ` (content-length ${declared})` : ""}`
+  );
+  error.code = "response_too_large";
+  error.maxBytes = maxBytes;
+  return error;
+}
+
+function bodyLimitFor(value) {
+  const requested = Number(value);
+  return Number.isFinite(requested) && requested > 0
+    ? Math.trunc(requested)
+    : DEFAULT_MAX_BODY_BYTES;
+}
+
+// Read the decoded body while counting bytes, and cancel it the moment it
+// passes the limit, so an oversize response is never held whole. With
+// `truncate`, the first maxBytes are kept and the rest is cancelled instead of
+// failing (error bodies: diagnostic text under the cap must survive).
+async function readBodyText(response, maxBytes, { truncate = false } = {}) {
+  // Content-Length is the wire size: it only bounds the decoded body when the
+  // response is not content-encoded, so a compressed response is judged on the
+  // decoded stream below.
+  const encoding = (response.headers?.get?.("content-encoding") || "").trim().toLowerCase();
+  const declared = Number(response.headers?.get?.("content-length"));
+  const reader = response.body?.getReader?.();
+  if (
+    !truncate &&
+    (encoding === "" || encoding === "identity") &&
+    Number.isFinite(declared) &&
+    declared > maxBytes
+  ) {
+    await reader?.cancel().catch(() => {});
+    throw responseTooLarge(maxBytes, declared);
+  }
+  if (!reader) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+    if (!truncate) throw responseTooLarge(maxBytes);
+    return Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
+  }
+  const decoder = new TextDecoder("utf-8");
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      if (bytes > maxBytes) {
+        if (!truncate) throw responseTooLarge(maxBytes);
+        text += decoder.decode(value.subarray(0, value.length - (bytes - maxBytes)));
+        return text;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
 }
 
 function requestHeaders(headers) {
@@ -292,8 +362,15 @@ async function request(
         `Career Ops provider request returned an invalid response for ${redactCredentialParams(url)}`
       );
     }
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => "");
+    // A provider that asks for redirect: "manual" validates and follows each hop
+    // itself (peoplesoft), so fetchResponse hands it the raw 3xx. guardedFetch has
+    // already declined to follow it; the provider's next request is guarded again.
+    const manualRedirect =
+      options.redirect === "manual" && response.status >= 300 && response.status < 400;
+    if (!response.ok && !(manualRedirect && options.returnManualRedirect === true)) {
+      const responseText = await readBodyText(response, ERROR_BODY_MAX_BYTES, {
+        truncate: true,
+      }).catch(() => "");
       const error = new Error(
         `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
       );
@@ -301,6 +378,8 @@ async function request(
       error.body = responseText;
       error.retryAfter = response.headers?.get?.("retry-after") || null;
       error.location = response.headers?.get?.("location") || null;
+      const cfMitigated = response.headers?.get?.("cf-mitigated");
+      if (cfMitigated) error.cfMitigated = cfMitigated;
       throw error;
     }
     return await consume(response);
@@ -329,7 +408,7 @@ export function createContext(fetchImpl, options = {}) {
         url,
         requestOptions,
         async (response) => {
-          const text = await response.text();
+          const text = await readBodyText(response, bodyLimitFor(requestOptions.maxBytes));
           return JSON.parse(text);
         },
         resolveHost,
@@ -342,7 +421,7 @@ export function createContext(fetchImpl, options = {}) {
         fetchImpl,
         url,
         requestOptions,
-        (response) => response.text(),
+        (response) => readBodyText(response, bodyLimitFor(requestOptions.maxBytes)),
         resolveHost,
         dispatcherFactory,
         options.signal
@@ -352,9 +431,11 @@ export function createContext(fetchImpl, options = {}) {
       return request(
         fetchImpl,
         url,
-        requestOptions,
+        { ...requestOptions, returnManualRedirect: true },
         async (response) => {
-          const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.text();
+          const body = NULL_BODY_STATUSES.has(response.status)
+            ? null
+            : await readBodyText(response, bodyLimitFor(requestOptions.maxBytes));
           return new Response(body, {
             status: response.status,
             statusText: response.statusText,

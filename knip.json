@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["pandoc", "soffice", "iconutil", "mkfifo"],
+  "ignoreBinaries": ["mkfifo"],
   "workspaces": {
     ".": {
       "entry": [
@@ -20,20 +20,17 @@
       ],
       "ignore": [
         "src/core/providers/career-ops/vendor/**",
+        "src/core/providers/career-ops/lib/**",
         "tests/fixtures/career-ops/**",
         "tests/fixtures/db-concurrency-worker.mjs"
       ]
     },
-    "apps/web": {},
     "apps/docs": {
       "ignoreDependencies": [
         "@fontsource/archivo",
         "@fontsource/ibm-plex-mono",
         "@fontsource/ibm-plex-sans"
       ]
-    },
-    "apps/desktop": {
-      "entry": ["scripts/*.mjs", "preload/*.cjs"]
     },
     "apps/website": {
       "ignoreDependencies": ["@fontsource/figtree"]

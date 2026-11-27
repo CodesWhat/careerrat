@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { userPath } from "./paths/workspace.mjs";
 
-export const DISCOVERY_PIPELINE = [
+const DISCOVERY_PIPELINE = [
   "setup-searches",
   "research-boards",
   "discover-companies",

@@ -435,12 +435,27 @@ test("old rows that collide after normalization merge into one", async (t) => {
   assert.equal(rows[0].body, "newer body");
 });
 
+test("a PeopleSoft row keyed with PostingSeq=1 is the same row once a scan returns PostingSeq=2", async (t) => {
+  const { raw, store, offer } = await migrationFixture(t);
+  const url = (seq) =>
+    `https://hr.example.edu/psc/hrprd/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&JobOpeningId=JR1&PostingSeq=${seq}&SiteId=1`;
+  store([offer(url(2))]);
+  raw((db) => {
+    db.prepare("UPDATE postings SET posting_key = ?, url = ?").run(`url:${url(1)}`, url(1));
+    db.exec("PRAGMA user_version = 2");
+  });
+
+  const added = store([offer(url(2))]);
+  assert.equal(added, 0);
+  assert.equal(raw((db) => db.prepare("SELECT * FROM postings").all()).length, 1);
+});
+
 test("the migration runs once and leaves non-url keys alone", async (t) => {
   const { open, raw, store, offer } = await migrationFixture(t);
   store([offer("https://careers.example.com/jobs/view?id=1", { reqId: "REQ-9" })]);
   assert.equal(
     raw((db) => db.prepare("PRAGMA user_version").get().user_version),
-    2
+    3
   );
   const keyBefore = raw((db) => db.prepare("SELECT posting_key FROM postings").get().posting_key);
   assert.match(keyBefore, /^req:/);

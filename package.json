@@ -46,7 +46,6 @@
     ".agents/skills/ingest-mail/SKILL.md",
     ".agents/skills/ingest-messages/SKILL.md",
     ".agents/skills/ingest-profile/SKILL.md",
-    ".agents/skills/intake-extract/SKILL.md",
     ".agents/skills/interview-prep/SKILL.md",
     ".agents/skills/optimize-linkedin/SKILL.md",
     ".agents/skills/reevaluate-strategy/SKILL.md",
@@ -55,7 +54,6 @@
     ".agents/skills/research-boards/SKILL.md",
     ".agents/skills/research-comp/SKILL.md",
     ".agents/skills/research-company/SKILL.md",
-    ".agents/skills/resume-extract/SKILL.md",
     ".agents/skills/schedule-meeting/SKILL.md",
     ".agents/skills/search-jobs/SKILL.md",
     ".agents/skills/setup-searches/SKILL.md",
@@ -71,7 +69,6 @@
     "docs/foundations-spec.md",
     "examples",
     "assets",
-    "apps/web/dist",
     "scripts/analyze-outcomes.mjs",
     "scripts/calibrate-writing-style.mjs",
     "scripts/capture-board-snapshot.mjs",
@@ -93,19 +90,12 @@
   ],
   "scripts": {
     "hooks:install": "lefthook install",
-    "prepack": "npm run build --workspace apps/web",
     "dev": "turbo dev",
     "build": "turbo build --filter=!@careerrat/docs",
     "site:dev": "npm --workspace @careerrat/website run dev",
     "site:build": "npm --workspace @careerrat/website run build",
     "docs:dev": "npm --workspace @careerrat/docs run dev",
     "docs:build": "npm --workspace @careerrat/docs run build",
-    "app:dev": "npm run dev --workspace apps/web",
-    "app:build": "npm run build --workspace apps/web",
-    "desktop": "npm --workspace apps/desktop run dev",
-    "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
-    "desktop:dist": "npm --workspace apps/desktop run dist",
-    "desktop:release": "npm --workspace apps/desktop run release",
     "release:pretag": "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs",
     "qa:native-search:evidence": "node scripts/verify-live-search-receipts.mjs",
     "lint": "biome check .",
@@ -123,8 +113,6 @@
     "evaluate": "node src/cli/evaluate.mjs",
     "questions": "node src/cli/questions.mjs",
     "tracker": "node src/cli/tracker.mjs",
-    "tracker:dev": "node src/cli/tracker-dev.mjs",
-    "serve": "node src/cli/tracker-dev.mjs",
     "gate": "node src/cli/gate.mjs",
     "learnings": "node src/cli/learnings.mjs",
     "activity": "node src/cli/activity.mjs",
@@ -183,31 +171,16 @@
   },
   "allowScripts": {
     "@homebridge/node-pty-prebuilt-multiarch@0.15.0": true,
-    "electron-winstaller@5.4.0": true,
     "fsevents@2.3.2": true,
-    "fsevents@2.3.3": true,
     "esbuild@0.28.2": true,
     "lefthook@2.1.12": true,
     "core-js": false
   },
   "overrides": {
-    "vite": "8.3.8",
     "postcss": "^8.5.10",
     "sharp": "$sharp",
     "minimatch@^10": "11.0.1",
-    "glob@^13": "14.0.2",
-    "@electron/universal": {
-      "minimatch": "11.0.1",
-      "dir-compare": {
-        "minimatch": "^3.0.5"
-      },
-      "@electron/asar": {
-        "minimatch": "^3.0.4",
-        "glob": {
-          "minimatch": "^3.1.1"
-        }
-      }
-    }
+    "glob@^13": "14.0.2"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

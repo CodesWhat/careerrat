@@ -76,7 +76,7 @@ function parseEnvLines(text) {
  * Read the logical `.internal/ai.env` path (repo `.internal/ai.env` in legacy
  * mode, `<CAREERRAT_HOME>/internal/ai.env` with CAREERRAT_HOME) and set any
  * keys it defines into `env` that are not already set there. Called once at
- * server boot (tracker-dev.mjs's createDevServer factory) so a stored key
+ * server boot (the retired tracker-dev server's factory) so a stored key
  * works without shell sourcing.
  *
  * @param {{ repoRoot: string, env?: object }} options

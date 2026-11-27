@@ -2,25 +2,13 @@
 // the callers that must agree with it: exact tracking keys are stripped,
 // identifying params (referenceId=77 vs 78) never collapse.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, test } from "node:test";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { matchTrackerRecord } from "../src/core/intake/match.mjs";
+import { test } from "node:test";
 import { normalizePostingUrl } from "../src/core/scoring/posting-url.mjs";
 import { diffSnapshotOffers, offerIdentityKeys } from "../src/core/scoring/sourced-delta.mjs";
 import {
   identityKeysWithAliases,
   postingIdentityKeys,
 } from "../src/core/scoring/sourced-identity.mjs";
-
-const roots = [];
-after(() => {
-  closeAll();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
 const A = "https://careers.example.com/jobs/view?referenceId=77";
 const B = "https://careers.example.com/jobs/view?referenceId=78";
@@ -37,36 +25,6 @@ test("normalizePostingUrl keeps identifying params and strips exact tracking key
   }
   assert.equal(normalizePostingUrl("not a url "), "not a url");
   assert.equal(normalizePostingUrl(""), "");
-});
-
-test("intake match keeps referenceId=77 and 78 apart but matches tracking-only variants", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-posting-url-"));
-  roots.push(repoRoot);
-  const sourceDir = join(repoRoot, "fixture-source");
-  mkdirSync(sourceDir, { recursive: true });
-  writeFileSync(
-    join(sourceDir, "tracker.json"),
-    JSON.stringify({
-      meta: {},
-      applications: [
-        { id: "app-77", company: "Acme", role: "Engineer", status: "applied", link: A },
-      ],
-      sourced: [],
-      sources: [],
-      communications: [],
-    })
-  );
-  importFromTracker({ repoRoot, sourceDir });
-  const db = openDb({ repoRoot });
-  const other = matchTrackerRecord({ db, url: B, company: "Zed", role: "Other" });
-  assert.notEqual(other.confidence, "exact_url");
-  const same = matchTrackerRecord({
-    db,
-    url: `${A}&utm_source=news&gh_src=q`,
-    company: "Zed",
-    role: "Other",
-  });
-  assert.equal(same.confidence, "exact_url");
 });
 
 test("scanner identity and snapshot delta keep referenceId=77 and 78 as distinct postings", () => {
@@ -93,4 +51,23 @@ test("persisted url aliases written under older normalizers still match", () => 
 
 test("an unparseable URL falls back to its trimmed, lowercased form", () => {
   assert.equal(normalizePostingUrl("  /Jobs/ABC "), "/jobs/abc");
+});
+
+const PS = (seq, extra = "") =>
+  `https://hr.example.edu/psc/hrprd/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&Action=U&JobOpeningId=JR00012345&PostingSeq=${seq}&SiteId=1${extra}`;
+
+test("PeopleSoft posting identity is tenant plus JobOpeningId, whatever PostingSeq answered", () => {
+  assert.equal(normalizePostingUrl(PS(1)), normalizePostingUrl(PS(2)));
+  assert.equal(normalizePostingUrl(PS(1)), normalizePostingUrl(PS(2, "&trk=x")));
+  const other = PS(1).replace("JR00012345", "JR00099999");
+  assert.notEqual(normalizePostingUrl(PS(1)), normalizePostingUrl(other));
+  const otherTenant = PS(1).replace("hr.example.edu", "jobs.other.edu");
+  assert.notEqual(normalizePostingUrl(PS(1)), normalizePostingUrl(otherTenant));
+
+  const tracked = [{ company: "Uni", title: "Analyst", url: PS(1) }];
+  const scanned = [{ company: "Uni", title: "Analyst", url: PS(2) }];
+  const delta = diffSnapshotOffers({ previous: tracked, current: scanned });
+  assert.equal(delta.newOffers.length, 0, "the seq 2 URL is the same opening, not a new row");
+  const seen = new Set(postingIdentityKeys({ url: PS(1) }));
+  assert.ok(postingIdentityKeys({ url: PS(2) }).some((key) => seen.has(key)));
 });

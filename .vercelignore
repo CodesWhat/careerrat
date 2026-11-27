@@ -56,6 +56,4 @@ out
 # Heavy local-only trees that broke the 100MB upload limit (2026-08-09).
 /qa
 /db
-/apps/desktop/dist
-/apps/desktop/staging
 /*.zip

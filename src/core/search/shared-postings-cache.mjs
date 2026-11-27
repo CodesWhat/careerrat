@@ -35,7 +35,8 @@ const SHARED_CACHE_SETTINGS = "shared-cache.json";
 const SHARED_CACHE_PROVENANCE = "shared-cache";
 const DEFAULT_FRESHNESS_HOURS = 6;
 // v2: url: posting keys were re-derived through the shared posting-identity normalizer.
-const SCHEMA_VERSION = 2;
+// v3: PeopleSoft urls no longer carry PostingSeq in the key (tenant + JobOpeningId only).
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources (
@@ -229,7 +230,7 @@ function migrateSchema(db) {
   try {
     // Another process may have migrated while this one waited for the lock.
     const { user_version: current } = db.prepare("PRAGMA user_version").get();
-    if (current < 2) migrateUrlKeys(db);
+    if (current < 3) migrateUrlKeys(db);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     db.exec("COMMIT");
   } catch (error) {

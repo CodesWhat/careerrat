@@ -1,8 +1,7 @@
 // Shared path-containment primitive for CareerRat's two independent runtime
 // file-access boundaries: runtime-tool-policy.mjs's general Read/Glob/Grep
 // allowlist (the chat/skill runtimes' broad tool profile) and
-// installed-runtimes.mjs's narrower exact-read staged-upload boundary (the
-// installed CLI runtimes' intake-extract/resume-extract skills). Both files
+// installed-runtimes.mjs's narrower exact-read staged-upload boundary. Both files
 // canonicalize (realpath) their own paths before calling this — it only
 // decides whether an already-canonical `candidate` resolves inside an
 // already-canonical `root`.

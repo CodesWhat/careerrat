@@ -19,8 +19,7 @@ export async function ensureInstalledRuntimeSelection({
   if (resolveAIRoute(env, { repoRoot }).type !== "none") return { selected: null, reason: null };
 
   const inspect =
-    inspectImpl ??
-    (await import("../../cli/installed-runtime-route.mjs")).inspectInstalledRuntimeState;
+    inspectImpl ?? (await import("./installed-runtime-state.mjs")).inspectInstalledRuntimeState;
   let state;
   try {
     state = await inspect({ repoRoot, env });
