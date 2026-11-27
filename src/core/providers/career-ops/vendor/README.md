@@ -48,6 +48,8 @@ verbatim from upstream; only message strings we emit are re-punctuated.
   and it pulls in `_ip-guard`; decide it with slice 18), `_trust-validator`
   (nothing we adopt imports it).
 
+CR70 slice 1 (2026-11-27) re-vendored verbatim from `13786939`: a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature. Notable upstream changes: amazon reads multi-city locations and sizes its page budget from reported hits, a16z-speedrun-talent gained filters and job details, arbeitsagentur reports partial boards, avature reads per-country pages. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
