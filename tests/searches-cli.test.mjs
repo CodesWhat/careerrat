@@ -100,7 +100,7 @@ test("legacy --add-query --provider routes supported providers to a runnable boa
   assert.equal(JSON.parse(result.stdout).searches[0].source_type, "board");
 });
 
-test("careerrat searches --providers exposes the complete pinned parity manifest", () => {
+test("careerrat searches --providers lists the runtime provider inventory with the pinned parity counts", () => {
   const home = tempHome();
   const result = runSearches(["--providers", "--json"], home);
   assert.equal(result.status, 0, result.stderr);

@@ -1,9 +1,9 @@
 # Career Ops provider conformance snapshot
 
 These provider contract tests come from `career-ops-hq/career-ops` commit
-`13786939dc79e0ec324b5571c9e6f29c50d43b53` under its MIT license. The provider
-fixtures below are still adapted from the earlier `8a20e491` snapshot until the
-CR70 slices that re-adapt them land.
+`13786939dc79e0ec324b5571c9e6f29c50d43b53` under its MIT license. All 153
+provider fixtures are adapted from that snapshot's suites; the slice notes
+below record how each batch was adapted.
 
 CR70 slice 0 (2026-11-27) added `helpers/`: upstream's suites for the shared
 helpers that have no provider id (`_html-to-text`, `_html-entities`,
@@ -94,7 +94,7 @@ fixtures are untouched from the prior pin.
 new, not rolled forward, and use invented, domain-neutral sample data rather
 than upstream's live-captured payloads.
 
-The 85 public-network provider suites are copied with their filenames and import
+The 153 public-network provider suites are copied with their filenames and import
 roots adapted so Node's test runner executes them against
 `src/core/providers/career-ops/vendor`. The VDAB/jobbankca/mycareersfuture
 ambient `config/profile.yml` fallback assertions are omitted because CareerRat

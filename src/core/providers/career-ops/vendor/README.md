@@ -8,10 +8,12 @@ repository name is unchanged, only the owner.
 
 Rolled forward 2026-11-27 (CR70 slice 0, foundation only) from
 `8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40`. This roll moves the pin and adds
-the shared plumbing the 70 new upstream providers need; it adopts no provider.
-Every provider file in this directory is still the pre-roll copy, and the 70
-new ids sat in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
-until their slice landed (see `.planning/cr70-slices.md`). Comments stay
+the shared plumbing the 70 new upstream providers need; it adopted no provider
+by itself. The later CR70 slices below then ported or added the providers, so
+the manifest in `src/core/providers/provider-parity.mjs` now lists 154 ids: 153
+implemented adapters plus `local-parser`, which is unsupported. Of the 157
+upstream providers, `sitemap`, `wellfound` and `telegram-channel` stay in
+`CAREER_OPS_DEFERRED_PROVIDER_IDS` as not adopted. Comments stay
 verbatim from upstream; only message strings we emit are re-punctuated.
 
 - New helpers copied verbatim: `_cached-lookup`, `_city-slug`, `_country`,
