@@ -231,7 +231,7 @@ test("probeAcpRuntime verifies initialize, authentication, and session creation 
   assert.equal(child.killed, true);
 });
 
-test("acpPermissionDecision grants only scoped MCP reads and scoped public-web fetches", () => {
+test("acpPermissionDecision grants only scoped public-web fetches and rejects every read", () => {
   const options = [
     { optionId: "allow", name: "Allow once", kind: "allow_once" },
     { optionId: "reject", name: "Reject", kind: "reject_once" },
@@ -248,7 +248,7 @@ test("acpPermissionDecision grants only scoped MCP reads and scoped public-web f
         options,
       },
     }),
-    { outcome: { outcome: "selected", optionId: "allow" } }
+    { outcome: { outcome: "selected", optionId: "reject" } }
   );
   assert.deepEqual(
     acpPermissionDecision({
@@ -475,11 +475,11 @@ test("runAcpRuntime closes any tool activity the provider leaves open at end of 
           update: {
             sessionUpdate: "tool_call",
             toolCallId: "read-1",
-            title: "Read staged input",
-            name: "read_staged_input",
-            kind: "read",
+            title: "Fetch listing",
+            name: "mcp__careerrat_scoped_tools__fetch",
+            kind: "fetch",
             status: "in_progress",
-            rawInput: {},
+            rawInput: { url: "https://example.com/jobs" },
           },
         },
       });
@@ -490,7 +490,7 @@ test("runAcpRuntime closes any tool activity the provider leaves open at end of 
     runtime: hermesRuntime(),
     prompt: "read",
     cwd: "/safe/task",
-    tools: ["Read"],
+    tools: ["WebFetch"],
     onMessage: (message) => activity.push(message),
     spawnImpl: () => child,
   });
@@ -500,15 +500,15 @@ test("runAcpRuntime closes any tool activity the provider leaves open at end of 
     {
       type: "tool_use",
       id: "read-1",
-      name: "Read",
-      input: {},
+      name: "WebFetch",
+      input: { url: "https://example.com/jobs" },
     },
   ]);
   assert.deepEqual(activity[1].message.content, [
     {
       type: "tool_result",
       tool_use_id: "read-1",
-      content: "Read staged input completed",
+      content: "Fetch listing completed",
       is_error: false,
     },
   ]);

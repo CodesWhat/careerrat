@@ -29,22 +29,9 @@ function toolIdentity(toolCall) {
     .replace(/^_+|_+$/g, "");
 }
 
-function isScopedReadCall(toolCall) {
-  return ["read_staged_input", "careerrat_scoped_tools_read_staged_input"].includes(
-    toolIdentity(toolCall)
-  );
-}
-
 function isScopedPublicFetchCall(toolCall) {
   return ["careerrat_scoped_tools_fetch", "mcp_careerrat_scoped_tools_fetch"].includes(
     toolIdentity(toolCall)
-  );
-}
-
-function hasToolArguments(toolCall) {
-  const raw = toolCall?.rawInput;
-  return Boolean(
-    raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0
   );
 }
 
@@ -221,14 +208,13 @@ export function buildAcpRuntimeInvocation({
 export function acpPermissionDecision({ tools = [], request } = {}) {
   const requested = new Set(Array.isArray(tools) ? tools.filter(Boolean) : []);
   const kind = String(request?.toolCall?.kind || "other");
-  const reads = requested.has("Read") && isScopedReadCall(request?.toolCall);
   const web =
     (requested.has("WebSearch") || requested.has("WebFetch")) &&
     kind === "fetch" &&
     isScopedPublicFetchCall(request?.toolCall);
   const webInput = web ? inferredToolInput(request?.toolCall) : {};
   const webAllowed = web && Boolean(webInput.url) && validatePublicHttpUrl(webInput.url).ok;
-  const allowed = (reads && !hasToolArguments(request?.toolCall)) || webAllowed || kind === "think";
+  const allowed = webAllowed || kind === "think";
   const wantedKind = allowed ? "allow_once" : "reject_once";
   const option = request?.options?.find(({ kind: optionKind }) => optionKind === wantedKind);
   if (!option) return { outcome: { outcome: "cancelled" } };
@@ -265,9 +251,6 @@ function acpToolCallAllowed({ tools = [], update } = {}) {
   const kind = String(update?.kind || "other");
   const title = String(update?.title || "").toLowerCase();
   if (kind === "think" || (kind === "other" && title.startsWith("todo"))) return true;
-  if (requested.has("Read") && isScopedReadCall(update)) {
-    return !hasToolArguments(update);
-  }
   const webRequested = requested.has("WebSearch") || requested.has("WebFetch");
   if (webRequested && kind === "fetch" && isScopedPublicFetchCall(update)) {
     const { url } = inferredToolInput(update);

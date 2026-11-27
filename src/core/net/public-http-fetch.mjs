@@ -84,7 +84,8 @@ export function validatePublicHttpUrl(rawUrl) {
     return { ok: false, reason: `unsupported URL scheme ${parsed.protocol}` };
   }
 
-  const hostname = normalizedHostname(parsed.hostname);
+  // A single trailing root dot ("localhost.") names the same host.
+  const hostname = normalizedHostname(parsed.hostname).replace(/\.$/, "");
   if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) {
     return { ok: false, reason: "private or local host is not fetchable" };
   }
@@ -614,22 +615,19 @@ function isNonPublicIp(value) {
     // Node's URL parser canonicalizes bracketed IPv6 hosts to the hex-group
     // form (::ffff:127.0.0.1 -> ::ffff:7f00:1), so a textual dotted-decimal
     // match alone lets an embedded IPv4 loopback/metadata address through.
-    // Decode any embedded IPv4 (mapped ::ffff:0:0/96, and the deprecated
-    // IPv4-compatible ::/96) from either textual form back to its IPv4 and
-    // reuse the IPv4 logic below on it.
+    // Decode any embedded IPv4 (mapped ::ffff:0:0/96, NAT64 64:ff9b::/96,
+    // 6to4 2002::/16) from either textual form back to its IPv4 and reuse
+    // the IPv4 logic below on it. IPv4-compatible ::a.b.c.d is outside 2000::/3
+    // and falls to the IPv6 allowlist, so it is non-public.
     const embedded = embeddedIpv4(host);
     if (embedded) return isNonPublicIp(embedded);
-    return (
-      host === "::" ||
-      host === "::1" ||
-      host.startsWith("fc") ||
-      host.startsWith("fd") ||
-      /^fe[89ab]/.test(host) ||
-      host.startsWith("2001:db8:")
-    );
+    return isNonGlobalIpv6(host);
   }
 
-  const [a, b, c] = host.split(".").map((part) => Number.parseInt(part, 10));
+  const [a, b, c, d] = host.split(".").map((part) => Number.parseInt(part, 10));
+  // 192.0.0.9/32 (PCP anycast) and 192.0.0.10/32 (TURN anycast) are the
+  // registry's globally reachable exceptions inside 192.0.0.0/24.
+  if (a === 192 && b === 0 && c === 0 && (d === 9 || d === 10)) return false;
   return (
     a === 0 ||
     a === 10 ||
@@ -639,6 +637,7 @@ function isNonPublicIp(value) {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 0 && c === 0) ||
     (a === 192 && b === 0 && c === 2) ||
+    (a === 192 && b === 88 && c === 99) || // deprecated 6to4 relay anycast
     (a === 192 && b === 168) ||
     (a === 198 && (b === 18 || b === 19)) ||
     (a === 198 && b === 51 && c === 100) ||
@@ -647,11 +646,50 @@ function isNonPublicIp(value) {
   );
 }
 
+// IPv6 allowlist: an address is public only if it is global unicast
+// (2000::/3) and not inside an IANA special-purpose entry that is not globally
+// reachable. Entries are [groups, prefixBits]. Anything that embeds an IPv4
+// (mapped, NAT64 well-known, 6to4) was already decoded by the caller.
+const IPV6_GLOBAL_UNICAST = [[0x2000], 3];
+const IPV6_NOT_GLOBAL = [
+  [[0x2001, 0], 23], // 2001::/23 protocol assignments, Teredo, benchmarking, ORCHID
+  [[0x2001, 0xdb8], 32], // documentation
+  [[0x3fff], 20], // documentation
+];
+// More-specific globally reachable carve-outs inside 2001::/23.
+const IPV6_GLOBAL_EXCEPTIONS = [
+  [[0x2001, 1, 0, 0, 0, 0, 0, 1], 128],
+  [[0x2001, 1, 0, 0, 0, 0, 0, 2], 128],
+  [[0x2001, 1, 0, 0, 0, 0, 0, 3], 128],
+  [[0x2001, 3], 32],
+  [[0x2001, 4, 0x112], 48],
+  [[0x2001, 0x20], 28],
+  [[0x2001, 0x30], 28],
+];
+
+function ipv6InPrefix(groups, [prefix, bits]) {
+  for (let i = 0; i * 16 < bits; i += 1) {
+    const remaining = Math.min(16, bits - i * 16);
+    const mask = (0xffff << (16 - remaining)) & 0xffff;
+    if ((groups[i] & mask) !== ((prefix[i] ?? 0) & mask)) return false;
+  }
+  return true;
+}
+
+function isNonGlobalIpv6(host) {
+  const g = ipv6ToGroups(host);
+  if (!g) return true;
+  if (!ipv6InPrefix(g, IPV6_GLOBAL_UNICAST)) return true;
+  if (IPV6_GLOBAL_EXCEPTIONS.some((entry) => ipv6InPrefix(g, entry))) return false;
+  return IPV6_NOT_GLOBAL.some((entry) => ipv6InPrefix(g, entry));
+}
+
 // Returns the embedded IPv4 (dotted-decimal string) for an IPv6 address that
 // carries one, or null otherwise. Covers every transition/translation form
 // that reaches a non-public IPv4 through an IPv6 spelling:
-//   - IPv4-mapped (::ffff:0:0/96) and the deprecated IPv4-compatible (::/96)
-//     forms, embedded in the low 32 bits (groups[6..7])
+//   - IPv4-mapped (::ffff:0:0/96), embedded in the low 32 bits
+//     (groups[6..7]). IPv4-compatible (::/96) is not decoded: it is deprecated
+//     and non-public as a whole.
 //   - the NAT64 well-known prefix (64:ff9b::/96), same low-32-bit embedding
 //   - 6to4 (2002::/16), which embeds the IPv4 higher up, in bits 16-47
 //     (groups[1..2]) — the remaining groups carry an SLA ID/interface ID and
@@ -666,8 +704,7 @@ function embeddedIpv4(host) {
 
   const highZero = groups.slice(0, 5).every((g) => g === 0);
   const isMapped = highZero && groups[5] === 0xffff;
-  const isCompatible = highZero && groups[5] === 0;
-  if (isMapped || isCompatible) return ipv4FromGroups(groups[6], groups[7]);
+  if (isMapped) return ipv4FromGroups(groups[6], groups[7]);
 
   const isNat64 =
     groups[0] === 0x64 &&

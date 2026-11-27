@@ -188,6 +188,183 @@ test("validatePublicHttpUrl still allows a genuinely public address embedded via
   assert.equal(sixToFour.ok, true);
 });
 
+// IANA IPv6 special-purpose registry: ranges that are not globally reachable.
+// Each one is rejected as a literal host and as a DNS answer.
+const NON_GLOBAL_IPV6 = {
+  "64:ff9b:1::/48 local-use NAT64 (RFC 8215)": [
+    "64:ff9b:1::1",
+    "64:ff9b:1::7f00:1",
+    "64:ff9b:1:ffff::1",
+  ],
+  "100::/64 discard-only": ["100::1", "100::ffff:ffff:ffff:ffff"],
+  "2001::/23 IETF protocol assignments and Teredo": [
+    "2001::1",
+    "2001:1::4",
+    "2001:2::1",
+    "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+  ],
+  "2001:db8::/32 documentation, non-canonical spelling": ["2001:0db8::1", "2001:db8:ffff::1"],
+  "3fff::/20 documentation": ["3fff::1", "3fff:fff:ffff::1"],
+  "5f00::/16 SRv6 SIDs": ["5f00::1", "5f00:ffff::1"],
+  "fe80::/10 link-local": ["fe80::1", "febf::1"],
+  "fec0::/10 deprecated site-local": ["fec0::1", "feff::1"],
+  "fc00::/7 unique local": ["fc00::1", "fdff::1"],
+  "ff00::/8 multicast": ["ff02::1", "ff05::2"],
+};
+
+test("validatePublicHttpUrl rejects every non-global IPv6 special-purpose range as a literal", () => {
+  for (const [range, hosts] of Object.entries(NON_GLOBAL_IPV6)) {
+    for (const host of hosts) {
+      const result = validatePublicHttpUrl(`http://[${host}]/`);
+      assert.equal(result.ok, false, `${host} (${range}) should be rejected`);
+    }
+  }
+});
+
+test("public fetch rejects non-global IPv6 DNS answers before network access", async () => {
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    throw new Error("unsafe target must not be fetched");
+  };
+  for (const [range, hosts] of Object.entries(NON_GLOBAL_IPV6)) {
+    for (const address of hosts) {
+      const result = await fetchPublicHttpText("https://answer.example.test/", {
+        fetchImpl,
+        resolveHost: async () => [
+          { address: "93.184.216.34", family: 4 },
+          { address, family: 6 },
+        ],
+      });
+      assert.equal(result.ok, false, `${address} (${range}) should be rejected`);
+      assert.equal(result.code, "unsafe_url");
+    }
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test("validatePublicHttpUrl still allows ordinary global IPv6 unicast", () => {
+  for (const host of [
+    "2606:4700:4700::1111",
+    "2a00:1450:4001:81b::200e",
+    "[64:ff9b::8.8.8.8]".slice(1, -1),
+  ]) {
+    assert.equal(validatePublicHttpUrl(`http://[${host}]/`).ok, true, `${host} should be allowed`);
+  }
+});
+
+test("validatePublicHttpUrl treats IPv6 as an allowlist: only 2000::/3 minus special-purpose ranges", () => {
+  for (const host of [
+    "4000::1",
+    "8000::1",
+    "100:0:0:1::1",
+    "::8.8.8.8",
+    "::808:808",
+    "::2",
+    "2001:2::1",
+    "2001:db8::1",
+    "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+    "2001:1::4",
+    "2001:5::1",
+    "2001:10::1",
+    "2001:1ff:ffff::1",
+  ]) {
+    assert.equal(validatePublicHttpUrl(`http://[${host}]/`).ok, false, `${host} should be blocked`);
+  }
+  for (const host of [
+    "2001:1::1",
+    "2001:1::2",
+    "2001:1::3",
+    "2001:3::1",
+    "2001:3:ffff:ffff::1",
+    "2001:4:112::1",
+    "2001:20::1",
+    "2001:2f:ffff::1",
+    "2001:30::1",
+    "2001:3f::1",
+    "2001:200::1",
+    "2620:4f:8000::1",
+  ]) {
+    assert.equal(validatePublicHttpUrl(`http://[${host}]/`).ok, true, `${host} should be allowed`);
+  }
+  assert.equal(validatePublicHttpUrl("http://[2001:4:113::1]/").ok, false);
+  assert.equal(validatePublicHttpUrl("http://[2001:40::1]/").ok, false);
+});
+
+// IANA IPv4 special-purpose registry, checked as a direct address and wrapped
+// in every IPv6 spelling that embeds an IPv4.
+function ipv4Wrappers(ip) {
+  const [a, b, c, d] = ip.split(".").map(Number);
+  const h1 = ((a << 8) | b).toString(16);
+  const h2 = ((c << 8) | d).toString(16);
+  return [
+    ip,
+    `[::ffff:${ip}]`,
+    `[::ffff:${h1}:${h2}]`,
+    `[64:ff9b::${ip}]`,
+    `[64:ff9b::${h1}:${h2}]`,
+    `[2002:${h1}:${h2}::]`,
+  ];
+}
+test("validatePublicHttpUrl matches the IANA IPv4 special-purpose registry, direct and wrapped", () => {
+  const blocked = [
+    "0.1.2.3",
+    "10.1.2.3",
+    "100.64.0.1",
+    "100.127.255.254",
+    "127.0.0.1",
+    "169.254.169.254",
+    "172.16.0.1",
+    "192.0.0.1",
+    "192.0.0.8",
+    "192.0.0.11",
+    "192.0.0.170",
+    "192.0.2.1",
+    "192.88.99.1",
+    "192.168.1.1",
+    "198.18.0.1",
+    "198.19.255.254",
+    "198.51.100.1",
+    "203.0.113.1",
+    "224.0.0.1",
+    "240.0.0.1",
+    "255.255.255.255",
+  ];
+  const allowed = [
+    "192.0.0.9",
+    "192.0.0.10",
+    "192.31.196.1",
+    "192.52.193.1",
+    "192.88.98.1",
+    "192.88.100.1",
+    "192.175.48.1",
+    "100.63.255.255",
+    "100.128.0.1",
+    "198.17.0.1",
+    "198.20.0.1",
+    "8.8.8.8",
+  ];
+  for (const ip of blocked) {
+    for (const form of ipv4Wrappers(ip)) {
+      assert.equal(validatePublicHttpUrl(`http://${form}/`).ok, false, `${form} should be blocked`);
+    }
+  }
+  for (const ip of allowed) {
+    for (const form of ipv4Wrappers(ip)) {
+      assert.equal(validatePublicHttpUrl(`http://${form}/`).ok, true, `${form} should be allowed`);
+    }
+  }
+});
+
+test("validatePublicHttpUrl strips one trailing root dot before the localhost checks", () => {
+  for (const host of ["localhost.", "LOCALHOST.", "app.localhost.", "a.b.localhost."]) {
+    const result = validatePublicHttpUrl(`http://${host}/`);
+    assert.equal(result.ok, false, `${host} should be rejected`);
+    assert.match(result.reason, /private or local host/);
+  }
+  assert.equal(validatePublicHttpUrl("http://localhost.example.com./").ok, true);
+});
+
 // guardedFetch is the Response-returning sibling of fetchPublicHttpText,
 // added for callers (the Career Ops provider registry) that need arbitrary
 // methods/bodies/headers and consume the body themselves rather than getting

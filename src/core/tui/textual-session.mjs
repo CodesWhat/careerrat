@@ -60,8 +60,11 @@ export async function createTextualSession({
     const current = held;
     held = null;
     if (!current) return;
-    current.release();
-    closeDb(current.ctx);
+    try {
+      current.release();
+    } finally {
+      closeDb(current.ctx);
+    }
   }
   let lastSnapshot = "";
   let framed = null;
@@ -237,42 +240,57 @@ export async function createTextualSession({
       }
     } catch (error) {
       teardownError = error;
-    } finally {
+    }
+    try {
       // Held until cleanup is done, then the cached connection goes with it.
       releaseHeld();
-      held = { ctx: nextCtx, release: nextHolder };
-      switching = false;
+    } catch (error) {
+      teardownError ??= error;
     }
+    // Whatever the cleanup did, the session now sits on the destination.
+    held = { ctx: nextCtx, release: nextHolder };
+    switching = false;
     if (closing) {
       releaseHeld();
       return;
     }
     env = nextEnv;
     ctx = nextCtx;
-    // The watcher's baseline comes before the final read, so a write during
-    // teardown is either in this read or reported by the watcher. If the fresh
-    // read can't be used, the preflight one stands.
-    startWatcher();
+    data = nextData;
+    state = nextState;
+    // Past this point the switch always ends on switch-complete: a failure
+    // below is reported as an error and never leaves the pane locked.
     try {
-      const freshData = readJobs(ctx);
-      state = createWorkspaceState(freshData);
-      data = freshData;
-    } catch {
-      data = nextData;
-      state = nextState;
+      // The watcher's baseline comes before the final read, so a write during
+      // teardown is either in this read or reported by the watcher. If the fresh
+      // read can't be used, the preflight one stands.
+      startWatcher();
+      try {
+        const freshData = readJobs(ctx);
+        state = createWorkspaceState(freshData);
+        data = freshData;
+      } catch {
+        data = nextData;
+        state = nextState;
+      }
+      lastSnapshot = "";
+      send(personEvent());
+      snapshot();
+      send({
+        type: "notice",
+        message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
+      });
+    } catch (error) {
+      teardownError ??= error;
     }
-    lastSnapshot = "";
-    send(personEvent());
-    snapshot();
-    send({
-      type: "notice",
-      message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
-    });
     if (teardownError)
       send({
         type: "error",
         message: `The previous workspace did not stop cleanly: ${teardownError.message}`,
       });
+    // The pane unlocks on this, not on the snapshot: a snapshot over the
+    // bridge's line cap is skipped, and the lock must not wait for it.
+    send({ type: "switch-complete" });
   }
   // The agent's launch arguments for the workspace now open: the opening message
   // depends on that person's setup, so it is decided on every start.
@@ -368,8 +386,10 @@ export async function createTextualSession({
         break;
       }
       case "switch-person": {
-        if (message.person !== null && typeof message.person !== "string")
+        if (message.person !== null && typeof message.person !== "string") {
+          send({ type: "switch-end" });
           throw new TypeError("Person must be a name or null");
+        }
         await switchPerson(message.person);
         break;
       }

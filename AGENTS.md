@@ -149,7 +149,7 @@ let's get started" (or anything that isn't a specific task):
 
 Always steer toward the next useful skill. CareerRat is an agentic workflow, not a
 set of passive list commands: when the user asks "what now?", reports something
-changed, or seems stalled, inspect `careerrat doctor`, the dashboard's Next agent
+changed, or seems stalled, inspect `careerrat doctor`, the workspace's Next agent
 task, and `workspace/tracker.json`, then recommend and run the owning skill.
 
 - If candidate setup is incomplete, run `ingest-profile`; if source setup is
@@ -286,7 +286,7 @@ generated `workspace/tracker.json` in a database-backed workspace.
 ## Actionability Write-Back Contract
 
 If a skill learns or creates state that the user should be able to act on later,
-it must be written to the workspace, not left only in chat. The live dashboard
+it must be written to the workspace, not left only in chat. The terminal workspace
 renders from these files.
 
 ### Tracker Write Contract (hard — binds every writing skill)
@@ -295,7 +295,8 @@ DB workspaces (`careerrat data status` exits 0) use the **Data Write Contract**
 below instead. This section governs legacy JSON-only workspaces (no
 `db/careerrat.db` under the data root yet, see Path Resolution).
 
-`workspace/tracker.json` is the **single source of truth** for the dashboard.
+`workspace/tracker.json` is the **single source of truth** for the terminal workspace and
+everything derived from it.
 Every skill that mutates it — `apply-job`, `evaluate-job`, `tailor-application`,
 `schedule-meeting`, `interview-prep`, `track-outcomes`, `email-comms`,
 `ingest-mail`, `ingest-messages`, `reevaluate-strategy`, `search-jobs`,
@@ -306,7 +307,7 @@ following as one logical write, in order, every time:
    `2026-06-23T17:42:00Z`) **and increment `meta.version`** (the monotonic write
    counter: read the current integer, add 1) in the SAME write that changes the
    data. The timestamp is what makes the "last updated" pill factual — the
-   dashboard reads `meta.lastUpdatedAt` first (`durableUpdatedAt`); without it the
+   tracker derivation module (`dashboard-data.js`) reads `meta.lastUpdatedAt` first (`durableUpdatedAt`); without it the
    pill falls back to scanning per-row dates and degrades to a permanent "<1 min
    ago". `meta.version` lets a concurrent or background writer detect the file
    changed under it. A write that changes data but omits the stamp is an
@@ -324,17 +325,17 @@ following as one logical write, in order, every time:
    `search-jobs`/`relationship-sourcing` when they add rows). Skip it for pure
    comms/scheduling writes (`email-comms`, `schedule-meeting`, `calendar-sync`,
    `interview-prep` dossier saves) — those don't alter the analytics block. Must
-   run **before** the verification snapshot so the dashboard reads the fresh block.
+   run **before** the verification snapshot so the derivation module reads the fresh block.
 4. **Snapshot:** run `careerrat tracker` as the durable recovery checkpoint.
    The open app reloads from the source-file write itself; there is no separate
-   renderer or dashboard agent. Never end a legacy tracker mutation without this
+   renderer or background agent. Never end a legacy tracker mutation without this
    checkpoint, including early-exit and CUT branches.
 5. **Log one Activity Pulse event** (`careerrat activity append …`) for any
    tracker-visible change, so the timeline and the pill agree. Include
    `--skill <skill-id>` and `--operation <resource:verb>` (e.g.
    `--skill track-outcomes --operation application:status-advance`) so the feed
    doubles as a mutation audit trail — "what did skill X change at time T" —
-   without re-reading prose. Both are optional and ignored by the dashboard
+   without re-reading prose. Both are optional and ignored by the workspace
    renderer, but agent-actor events should carry them.
 
 CLI-process writes (`stories` sync, `strategy-review` stamp) go through
@@ -376,7 +377,7 @@ contract — there is no code interceptor for them, by design.
   JD) and save it flagged `partial`, rather than saving nothing.
 - After any tracker-visible write, run `careerrat tracker --verify` and
   `npm run verify:tracker` when domain integrity could be affected, then
-  `careerrat tracker` so the D dashboard module and shell are published.
+  `careerrat tracker` so the derived tracker data and shell are published.
 - **Sent-clears-draft invariant (hard).** When a communications record transitions
   from `status: drafted` to `status: waiting` (a message is sent), the writer MUST
   also set `comm.draft = null` in the SAME `tracker.json` write — and if the draft
@@ -457,7 +458,7 @@ Verbs available today (`careerrat data --help` for exact syntax):
 
 ### Tracker Content Register (hard)
 
-The dashboard renders typed fields, not one free-text blob. Every field holds
+The terminal workspace renders typed fields, not one free-text blob. Every field holds
 **exactly one topic** within a **hard character budget**. This governs fields written
 to canonical tracker state (`careerrat data ...` in DB workspaces, `workspace/tracker.json`
 in legacy workspaces); it is separate from `agent_voice` (which governs chat
@@ -519,12 +520,12 @@ prompt.
 ### Company logos
 
 The company chip on every Jobs row resolves its avatar in one fixed order
-(`avatarMarkup` in `dashboard-data.js`), and skills only ever touch the first rung:
+(`avatarMarkup` in `dashboard-data.js`, the tracker derivation module), and skills only ever touch the first rung:
 
 1. **`applications[].logo`** (and `sourced[].logo`) — an explicit image path or URL.
    If set, it wins. This is the **standard field a skill writes** when it has a real
    logo in hand: the user asked you to fetch the employer's logo, or you captured one
-   while applying. Write the path/URL here and the dashboard picks it up — no other
+   while applying. Write the path/URL here and the workspace picks it up — no other
    wiring. A relative path resolves from the current app route (the demo seed uses
    `../assets/logos/<slug>.png`); a full `https://` URL also works.
 2. **logo.dev lookup** — only when `settings.logoToken` is set (a PRIVATE, opt-in
@@ -534,7 +535,7 @@ The company chip on every Jobs row resolves its avatar in one fixed order
    its image 404s, via the `<img onerror>`). Always-correct, never blocks rendering.
 
 So the rule for skills: **if you have/fetch a real logo, write `app.logo`; otherwise
-leave it empty** and the dashboard falls back to logo.dev-if-wired, else a monogram.
+leave it empty** and the workspace falls back to logo.dev-if-wired, else a monogram.
 Stay domain-neutral (see Domain-Neutral Rule) — never hardcode a real employer's logo
 in code. The only bundled logos are the fictional-corp demo seed (`assets/logos/`,
 mapped in `demo-logos.mjs`), normalized to a uniform 256×256 white-padded square PNG;
@@ -542,12 +543,13 @@ mapped in `demo-logos.mjs`), normalized to a uniform 256×256 white-padded squar
 
 ### Round Vocabulary (hard — the canonical interview ladder)
 
-Interview rounds are named by **type**, never numbered. The dashboard derives an
+Interview rounds are named by **type**, never numbered. The tracker derivation module derives an
 application's pipeline rung from the *deepest* `conversations[].kind` it can
 classify — so the name you write into `kind` is the name the user sees on the card,
 pill, rail, and Focus meta. Use this exact vocabulary so every company aligns to the
 same ladder (one company's "onsite" reads the same as another's). This is the SSOT;
-it is mirrored by the classifier in `src/core/tracker/dashboard-data.js`
+it is mirrored by the classifier in the tracker derivation module,
+`src/core/tracker/dashboard-data.js`
 (`STAGE_RULES`) and the sync normalizer in `src/core/automation/status-map.mjs`.
 
 **Canonical ladder (deepest wins):**
@@ -944,7 +946,7 @@ as fallback). Skills that produce outbound text route around `current_base` by f
   scheduling responses must be complete artifacts, not templates.
 - Run placeholder lint before marking artifacts build-ready or upload-ready.
 - **Every artifact lands in two places: on the record and in Documents.** Bake it
-  onto its tracker record so the user can copy it from the dashboard —
+  onto its tracker record so the user can copy it from the terminal workspace —
   `comm.draft` / `app.followUp.draft` for emails and messages, the `tailored/` or
   artifact path for documents — AND export a copy to Documents (`.txt` for emails
   and messages, PDF for formatted documents). `workspace/` stays the source of
@@ -1016,7 +1018,7 @@ Treat fit as a prior and outcomes as evidence. On small-N, **recommend** changes
 (re-rank sourced roles, edit `targeting.yml`, re-anchor comp) — do not silently
 re-score on noise. Log what changed and why.
 
-**Self-clearing review nudge (hard).** The dashboard "review ready" nudge is derived
+**Self-clearing review nudge (hard).** The workspace "review ready" nudge is derived
 live from the rolling 30-day funnel, so it has no memory of whether a review ran — left
 ungated it re-fires on every render forever. On completion `reevaluate-strategy` MUST
 stamp `tracker.json#strategyReview` (`careerrat strategy-review stamp --write`), which
@@ -1026,14 +1028,14 @@ accrue past the threshold (default 5) or a slow drip ages past the cooldown (def
 days). This stamp is unconditional — a no-change review still counts as a review. The
 marker is mechanical (timestamp + counts); the skill owns the strategy judgement.
 
-**Two distinct gates — don't conflate them.** The dashboard "review ready" nudge
+**Two distinct gates — don't conflate them.** The workspace "review ready" nudge
 (`buildStrategyReviewTrigger`) first fires once the rolling 30-day funnel clears
 `meetsThreshold` (**≥3 applied, and ≥2 advanced or ≥2 rejected**). After a review is
 stamped, it only re-fires on fresh signal: **≥5 new resolved outcomes**
 (`STRATEGY_REVIEW_NEW_SIGNAL`) since that review, or **≥1 new outcome** once
 **21 days** (`STRATEGY_REVIEW_COOLDOWN_DAYS`) have passed. The `reevaluation.due` trip
 fires on the **rejection-only delta** (`sinceLastReview`) against `targeting.yml`
-thresholds. A nudge can show with few or zero rejections; never read the dashboard pill
+thresholds. A nudge can show with few or zero rejections; never read the nudge pill
 as `reevaluation.due: true`, and never read `reevaluation.due` as the nudge.
 
 ## Learning Memory
@@ -1154,14 +1156,14 @@ portal advances and logs the matching event in that transaction.
   the other party) is **not** the candidate's action just because it carries a
   descriptive `nextAction` ("Await their call") — it re-surfaces only when its
   `nextActionDue` follow-up timer fires (they've gone quiet). The gate is
-  `commIsActionable` in `dashboard-data.js`; so when a skill replies and hands the ball
-  back, set `status: "waiting"` and the dashboard drops it from Next Steps on its own.
+  `commIsActionable` in the tracker derivation module (`dashboard-data.js`); so when a skill replies and hands the ball
+  back, set `status: "waiting"` and the workspace drops it from Next Steps on its own.
   (2) A follow-up/next-touch nudge requires a **contact path** — a linked
   recruiter/email thread, a logged conversation with a named person, or an explicit
   contact on the row. A black-hole portal or cold application you have no contact for
   has nobody to nudge, so `computeFollowUps` suppresses its `app-nudge` and the Jobs
   action cell stays blank (`appHasContactPath` in `cadence.mjs`, `hasContactPath` in
-  `dashboard-data.js`). For such a row the real move is `relationship-sourcing` (find a
+  the tracker derivation module, `dashboard-data.js`). For such a row the real move is `relationship-sourcing` (find a
   contact first) or a plain wait/archive call — never a follow-up drafted to no one.
 - **Honesty + privacy (hard).** The feed renders in the terminal workspace, so it is **outbound**:
   every event is schema-validated against `config/activity-event.schema.json`, refused if
@@ -1299,7 +1301,7 @@ loops so prep compounds instead of restarting each round.
   `gaps [--competencies "…"]` (behavioural themes no story covers yet),
   `match <jd.md.json> | --signals "…"` (rank stories for a role), `add --file <f>`
   (dry-run; `--write` to commit an atomic upsert by id),
-  `sync-enrichment [--write]` (mirror open questions into the dashboard — see below).
+  `sync-enrichment [--write]` (mirror open questions into the terminal workspace — see below).
 - **Ingest sets the flag (candidate's account is truth).** A story may be banked with
   thin spots — bank it now, never gate on a missing detail. Record each gap (a metric
   to confirm, a concrete before/after, a detail that conflicts with committed code) as
@@ -1404,7 +1406,7 @@ captcha, a 2FA prompt, a mail login wall, or an application-limit blocker.
 write it under `workspace/captures/` — which is gitignored — and **never** to the
 repo root or `workspace/` root (stray PNGs there are also backstop-ignored). Don't
 commit captures. Only when a screenshot is meant to be shown in the app do you write
-it to a deliberately tracked path and reference it from the tracker/dashboard.
+it to a deliberately tracked path and reference it from the tracker.
 `track-outcomes` remains the owner of canonical tracker status transitions; in DB
 workspaces it writes via `careerrat data`, and in legacy workspaces it writes the
 tracker JSON. Status-polling and messaging hand it transitions, they don't write

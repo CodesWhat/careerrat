@@ -269,3 +269,24 @@ test("Grep denies a directory sweep when an approved workspace contains a nested
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+test("WebFetch gate denies trailing-dot localhost and still allows a public host", async () => {
+  const policy = createRuntimeToolPolicy({
+    repoRoot: tmpdir(),
+    skill: "evaluate-job",
+    tools: ["WebFetch"],
+    env: {},
+  });
+  for (const url of [
+    "http://localhost./admin",
+    "https://LOCALHOST./",
+    "http://app.localhost./",
+    "http://[::ffff:c000:2]/",
+  ]) {
+    assert.equal((await policy.canUseTool("WebFetch", { url })).behavior, "deny", url);
+  }
+  assert.equal(
+    (await policy.canUseTool("WebFetch", { url: "https://example.com./" })).behavior,
+    "allow"
+  );
+});
