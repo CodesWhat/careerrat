@@ -16,6 +16,8 @@ Skipped, with the helpers they cover not vendored: `_http*`, `_dns-*`,
 
 CR70 slice 1: the fixtures for a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
 
+CR70 slice 2: the fixtures for bamboohr, beesite, breezy, builtin, careerviet, comeet, cryptocurrencyjobs, csod, dassault, deutschebahn, echojobs, eightfold were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location

@@ -50,6 +50,8 @@ verbatim from upstream; only message strings we emit are re-punctuated.
 
 CR70 slice 1 (2026-11-27) re-vendored verbatim from `13786939`: a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature. Notable upstream changes: amazon reads multi-city locations and sizes its page budget from reported hits, a16z-speedrun-talent gained filters and job details, arbeitsagentur reports partial boards, avature reads per-country pages. Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 2 (2026-11-27) re-vendored verbatim from `13786939`: bamboohr, beesite, breezy, builtin, careerviet, comeet, cryptocurrencyjobs, csod, dassault, deutschebahn, echojobs, eightfold. bamboohr now sends `redirect: 'manual'` on its list request and reads `err.status`/`err.location`; `guardedFetch` never follows a non-follow redirect, so the SSRF guard is unchanged, and `tests/provider-parity.test.mjs` now expects `manual` for that request. The bamboohr and cryptocurrencyjobs fixtures drop the cases that import upstream's `scan.mjs` (`buildLocationFilter`, `isOfferSeen`, `markOfferSeen`, `listingIdentityToken`), which CareerRat does not vendor. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the

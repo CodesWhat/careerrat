@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 ### Changed
 
 - Career Ops provider snapshot: the pin moves to upstream `13786939` and the shared helpers the new job-board sources need are in place (board truncation, posting close dates, HTML and entity text, salary, country and employment-type parsing). No new source is turned on yet, and the 70 upstream sources still to come are tracked as pending in the parity manifest.
+- The BambooHR, Beesite, Breezy, Built In, CareerViet, Comeet, CryptocurrencyJobs, Cornerstone, Dassault, Deutsche Bahn, EchoJobs and Eightfold sources are updated to the latest upstream. BambooHR now tells a dead or suspended board apart from an empty one by reading the redirect without following it, reads the posted date, and adds a stable id per posting.
 - The a16z speedrun talent, Agentic Jobs, Amazon, Arbeitnow, Arbeitsagentur and Avature sources are updated to the latest upstream. Amazon lists every city of a multi-city job and reads a whole board by its reported size, a16z speedrun talent supports filters and job details, Arbeitsagentur marks a board partial when a keyword fails, and Avature reads per-country opening pages.
 - The `doctor` company-board hint counts the public adapters CareerRat actually ships instead of the upstream total.
 - The sitemap no longer lists the old dashboard stub, and the stub is marked noindex.
