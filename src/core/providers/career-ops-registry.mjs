@@ -292,7 +292,12 @@ async function request(
         `Career Ops provider request returned an invalid response for ${redactCredentialParams(url)}`
       );
     }
-    if (!response.ok) {
+    // A provider that asks for redirect: "manual" validates and follows each hop
+    // itself (peoplesoft), so fetchResponse hands it the raw 3xx. guardedFetch has
+    // already declined to follow it; the provider's next request is guarded again.
+    const manualRedirect =
+      options.redirect === "manual" && response.status >= 300 && response.status < 400;
+    if (!response.ok && !(manualRedirect && options.returnManualRedirect === true)) {
       const responseText = await response.text().catch(() => "");
       const error = new Error(
         `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
@@ -354,7 +359,7 @@ export function createContext(fetchImpl, options = {}) {
       return request(
         fetchImpl,
         url,
-        requestOptions,
+        { ...requestOptions, returnManualRedirect: true },
         async (response) => {
           const body = NULL_BODY_STATUSES.has(response.status) ? null : await response.text();
           return new Response(body, {

@@ -36,6 +36,18 @@ CR70 slice 10: the fixtures for ashby, consider and recruitee were regenerated f
 
 CR70 slice 11: the fixtures for smartrecruiters, meituan and alibaba were regenerated from upstream's `13786939` suites. smartrecruiters drops the `scan.mjs` age-filter and dedup cases; all three keep a local case that a description past the byte cap sets `descriptionPartial`.
 
+CR70 slice 12: new fixtures for atlassian, factorial, hiringroom, generalist-world, germantechjobs, startup-jobs, pythonorg, prevueaps, hibob, inhire, remote-com, applitrack, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 13: new fixtures for aldi-nord, apple, bwi, bulldogjob, deel, bolt, dover, paylocity, polymer, redrover, notion, jazzhr, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 14: new fixtures for bizneo, computrabajo, goldman, google, hirehive, itjobs, magneto, neogov, occ, paycom, schoolspring, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 15: new fixtures for pracecz, platsbanken, jobscz, kalibrr, techinasia, kariyer, kula, rexx, tes, velorahr, trakstar, keka, homerun, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 16: new fixtures for adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
+CR70 slice 17: new fixtures for gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager (plus a regenerated successfactors fixture; the peoplesoft sample page says "Graduate degree" where upstream says a banned word, so the repo's inclusive-language test passes), adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location
