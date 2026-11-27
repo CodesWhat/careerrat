@@ -119,16 +119,16 @@ test("findUserDataLeaks does not false-positive on a lookalike directory name", 
   assert.deepEqual(leaks, []);
 });
 
-test("refreshUpdateCacheInBackground forces Electron's detached child into Node mode", async () => {
+test("refreshUpdateCacheInBackground spawns the detached update check", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-update-core-"));
   const careerratHome = join(repoRoot, "careerrat-home");
-  const resultPath = join(repoRoot, "electron-run-as-node.txt");
+  const resultPath = join(repoRoot, "update-check-ran.txt");
 
   try {
     mkdirSync(join(repoRoot, "scripts"), { recursive: true });
     writeFileSync(
       join(repoRoot, "scripts/update-check.mjs"),
-      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(resultPath)}, String(process.env.ELECTRON_RUN_AS_NODE ?? ""));\n`
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(resultPath)}, "ran");\n`
     );
 
     const pathCtx = {
@@ -138,7 +138,7 @@ test("refreshUpdateCacheInBackground forces Electron's detached child into Node 
     refreshUpdateCacheInBackground(pathCtx, repoRoot);
 
     await waitForFile(resultPath);
-    assert.equal(readFileSync(resultPath, "utf8"), "1");
+    assert.equal(readFileSync(resultPath, "utf8"), "ran");
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

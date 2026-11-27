@@ -337,14 +337,10 @@ export function refreshUpdateCacheInBackground(pathCtx, root) {
   const script = join(root, "scripts/update-check.mjs");
   if (!existsSync(script)) return;
   try {
-    // ELECTRON_RUN_AS_NODE, scoped to this one child: under the desktop
-    // shell process.execPath is the Electron binary — without it this
-    // detached spawn left a headless GUI app instance in the dock on every
-    // stale-cache boot. A plain node parent ignores the variable.
     const c = spawn(process.execPath, [script], {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: process.env,
     });
     c.unref();
   } catch {

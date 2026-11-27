@@ -84,7 +84,7 @@ test("callAI (installed runtime): result carries numeric elapsedMs and the insta
   const root = tempRoot();
   try {
     const executable = createVerifiedRuntimeExecutable({ root, runtimeId: "codex" });
-    const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+    const env = { CAREERRAT_INSTALLED_AI: "1" };
     writeInstalledRuntimeSelection({
       repoRoot: root,
       env,
