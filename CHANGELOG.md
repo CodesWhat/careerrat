@@ -17,6 +17,11 @@ All notable changes to CareerRat are documented here. This project follows
 - The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.
 - CI: the main-only `web-build`, `windows-package-smoke` and `browser-application-prep` jobs no longer build the web app, the Windows installer or the visual-contract app. `web-build` runs the packed npm install smoke, `windows-package-smoke` runs the `[win32]` tests plus that smoke on Windows, and `browser-application-prep` runs only the live application-preparation tests. The job names stay because the main ruleset requires them.
 
+### Removed
+
+- The Electron desktop app (`apps/desktop`), its release workflow (`desktop-release.yml`), the Homebrew cask generator, the `desktop`, `desktop:fresh`, `desktop:dist` and `desktop:release` npm scripts, and the Electron PDF renderer hook in document export. PDFs render with Playwright Chromium only. The Mac app ended at v0.19.2; npm is the only way to install CareerRat.
+- `docs/WINDOWS.md` is now a short "Windows: install from npm" page, and `docs/RELEASE.md` drops the retired Mac build and Homebrew cask sections.
+
 ### Fixed
 
 - A blocked Adzuna search request no longer prints your app id and key in the error message.

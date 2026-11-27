@@ -2,8 +2,8 @@ name: release
 
 # npm-only release pipeline. Pushing a signed annotated tag `vX.Y.Z` on protected
 # main publishes the GitHub release, then npm (publish.yml) and the SBOM
-# (sbom.yml). The Mac app ended at v0.19.2; desktop-release.yml is
-# dispatch-only until it is removed, so no tag starts a Mac or Windows build.
+# (sbom.yml). The Mac app ended at v0.19.2, so no tag starts a Mac or
+# Windows build.
 #
 # workflow_dispatch backfills the LATEST vX.Y.Z tag without needing a new tag
 # push. It takes no inputs, matching the checkov CKV_GHA_7 rule the qlty gate
@@ -50,8 +50,7 @@ jobs:
           egress-policy: block
           # This job only calls the GitHub API through `gh` (tag list on the
           # dispatch path, the tag-check API, and package.json at the tag).
-          # Same allowlist desktop-release.yml's resolve-tag job runs under
-          # (observed on runs 32487926861 and 32487059880).
+          # Allowlist observed on runs 32487926861 and 32487059880.
           allowed-endpoints: >
             api.github.com:443
       - name: Resolve the release tag
@@ -133,9 +132,8 @@ jobs:
         with:
           egress-policy: block
           # Changelog lookup, release creation, workflow dispatch and child-run
-          # status checks all use GitHub's API through gh. Same allowlist
-          # desktop-release.yml's publish-release job runs under (observed on
-          # run 32487926861); nothing here is fetched from github.com.
+          # status checks all use GitHub's API through gh. Allowlist observed on
+          # run 32487926861; nothing here is fetched from github.com.
           allowed-endpoints: >
             api.github.com:443
       - name: Require private release privacy configuration

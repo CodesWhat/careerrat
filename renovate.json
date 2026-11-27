@@ -21,11 +21,6 @@
       "description": "Queue major upgrades in the dependency dashboard until selected.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
-    },
-    {
-      "description": "The Mac app ended at v0.19.2; do not update its retired release workflow.",
-      "matchFileNames": [".github/workflows/desktop-release.yml"],
-      "enabled": false
     }
   ]
 }

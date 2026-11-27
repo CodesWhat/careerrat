@@ -102,10 +102,6 @@
     "docs:build": "npm --workspace @careerrat/docs run build",
     "app:dev": "npm run dev --workspace apps/web",
     "app:build": "npm run build --workspace apps/web",
-    "desktop": "npm --workspace apps/desktop run dev",
-    "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
-    "desktop:dist": "npm --workspace apps/desktop run dist",
-    "desktop:release": "npm --workspace apps/desktop run release",
     "release:pretag": "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs",
     "qa:native-search:evidence": "node scripts/verify-live-search-receipts.mjs",
     "lint": "biome check .",
@@ -183,7 +179,6 @@
   },
   "allowScripts": {
     "@homebridge/node-pty-prebuilt-multiarch@0.15.0": true,
-    "electron-winstaller@5.4.0": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
     "esbuild@0.28.2": true,
@@ -195,19 +190,7 @@
     "postcss": "^8.5.10",
     "sharp": "$sharp",
     "minimatch@^10": "11.0.1",
-    "glob@^13": "14.0.2",
-    "@electron/universal": {
-      "minimatch": "11.0.1",
-      "dir-compare": {
-        "minimatch": "^3.0.5"
-      },
-      "@electron/asar": {
-        "minimatch": "^3.0.4",
-        "glob": {
-          "minimatch": "^3.1.1"
-        }
-      }
-    }
+    "glob@^13": "14.0.2"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

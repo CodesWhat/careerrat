@@ -37,12 +37,6 @@ test("README states runtime, update, and Windows boundaries without overclaiming
   assert.match(flattened, /install Claude Code for you on first run/);
   assert.doesNotMatch(flattened, /already installed before anything in the app works/i);
   assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
-  assert.match(readme, /downloads the signed and notarized\s+app update/i);
-  assert.match(readme, /Restart and install/);
-  assert.match(readme, /Windows self-update stays off/i);
-  assert.match(readme, /Automatic checks can be disabled in[\s\S]*Settings/);
-  assert.match(readme, /SignPath Foundation/);
-  assert.match(readme, /public Windows installer will[\s\S]*only after/);
 });
 
 test("README lists every shipped skill exactly once", async () => {

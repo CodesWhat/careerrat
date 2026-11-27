@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -377,38 +378,43 @@ async function postRaw(server, path, bodyText) {
 // These route tests exercise the real /api/packet/generate → generatePacket
 // → exportPacketArtifacts pipeline, which always renders a PDF (exports.mjs
 // requestedFormats() puts "pdf" in the set unconditionally). mountPacketRoutes
-// has no injection point for exportPacketArtifacts on this route, so the only
-// way to keep real generation coverage without a live Chromium is the same
-// loopback desktop-renderer escape hatch renderPdf() already ships for the
-// Electron client (see tests/pdf-renderer.test.mjs, ISSUE-028): point it at
-// a fake local server that hands back a minimal valid PDF.
+// has no injection point for exportPacketArtifacts on this route, and CI has
+// no Playwright Chromium, so a module resolve hook swaps the `playwright`
+// import renderPdf() does at call time for a stub that writes a minimal valid
+// PDF.
 const FAKE_PDF_BYTES = Buffer.from("%PDF-1.4\n%CareerRat test fixture\n%%EOF\n", "utf8");
 
-function startFakePdfRenderer() {
-  const server = createServer((req, res) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      res.writeHead(200, { "content-type": "application/pdf" });
-      res.end(FAKE_PDF_BYTES);
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
-}
+const PLAYWRIGHT_STUB_SOURCE = `
+import { writeFileSync } from "node:fs";
+const bytes = Buffer.from(${JSON.stringify(FAKE_PDF_BYTES.toString("base64"))}, "base64");
+export const chromium = {
+  async launch() {
+    return {
+      async newPage() {
+        return {
+          async setContent() {},
+          async pdf({ path }) {
+            writeFileSync(path, bytes);
+          },
+        };
+      },
+      async close() {},
+    };
+  },
+};
+`;
 
-let fakePdfRenderer;
-let savedDesktopRenderUrl;
-let savedDesktopRenderToken;
+const PLAYWRIGHT_STUB_URL = `data:text/javascript;base64,${Buffer.from(PLAYWRIGHT_STUB_SOURCE).toString("base64")}`;
 
-before(async () => {
-  fakePdfRenderer = await startFakePdfRenderer();
-  const { port } = fakePdfRenderer.address();
-  savedDesktopRenderUrl = process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
-  savedDesktopRenderToken = process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
-  process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = `http://127.0.0.1:${port}/render`;
-  process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = "packet-generate-route-test-fixture";
+const RESOLVE_HOOK_URL = `data:text/javascript;base64,${Buffer.from(
+  `export async function resolve(specifier, context, next) {
+    if (specifier === "playwright") return { url: ${JSON.stringify(PLAYWRIGHT_STUB_URL)}, shortCircuit: true };
+    return next(specifier, context);
+  }`
+).toString("base64")}`;
+
+before(() => {
+  register(RESOLVE_HOOK_URL);
 });
 
 after(async () => {
@@ -421,11 +427,6 @@ after(async () => {
       // best-effort cleanup
     }
   }
-  await closeServer(fakePdfRenderer);
-  if (savedDesktopRenderUrl === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
-  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = savedDesktopRenderUrl;
-  if (savedDesktopRenderToken === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
-  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = savedDesktopRenderToken;
 });
 
 test("POST /api/packet/gate: 409 when SQLite has not been initialized", async () => {

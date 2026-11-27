@@ -95,8 +95,6 @@ test("v0.16.6 docs describe candidate behavior without rewriting v0.16.5 history
   assert.match(changelog, /finite job, recruiter-thread, and company ambiguities/i);
   assert.match(changelog, /First, manual, and AI searches now share one durable worker owner/i);
 
-  assert.match(readme, /Restart and install/i);
-
   for (const publicCopy of [readme, install]) {
     assert.doesNotMatch(publicCopy, /v0\.16\.6 is the current release/i);
     assert.match(publicCopy, /Claude Code and Codex (?:run|the same complete)/i);
@@ -110,11 +108,6 @@ test("v0.16.6 docs describe candidate behavior without rewriting v0.16.5 history
     assert.match(publicCopy, /uncertainty (?:always )?stop it and hand the form to you/i);
     assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
     assert.match(publicCopy, /careerrat start/i);
-    assert.match(
-      publicCopy,
-      /Windows x64 installer pass(?:ed|es) build, install, launch, export, and uninstall\s+QA/i
-    );
-    assert.match(publicCopy, /SignPath Foundation signing[\s\S]{0,80}requires project reputation/i);
     assert.doesNotMatch(publicCopy, /unreleased release candidate/i);
     assert.doesNotMatch(publicCopy, /v0\.16\.5 is the current public release/i);
   }
