@@ -14,11 +14,6 @@ first.
 The agent is the runtime; the skills are the how-to. When in doubt about *how* to
 do something, open the owning skill and follow it — don't improvise the procedure.
 
-`intake-extract` and `resume-extract` are backend-only helpers invoked by the
-Universal Intake and onboarding upload routes. They are shipped skills, but they
-are not user-intent destinations; route the user's goal to the owning intake or
-onboarding flow instead of asking them to invoke an extraction helper.
-
 Teach as you go. When a skill, feature, or tracker concept first becomes relevant,
 explain it in a line or two so the user learns the system by using it — progressive
 disclosure, not a front-loaded manual.
@@ -182,25 +177,29 @@ task, and `workspace/tracker.json`, then recommend and run the owning skill.
 After every skill finishes, surface the next handoff in one line. If an optional
 discovery step is intentionally skipped, record it with `careerrat next --skip <step> --write`
 where `<step>` is `research-boards` or `discover-companies`, so doctor,
-`careerrat next`, and the dashboard stop recommending it.
+`careerrat next`, and the terminal workspace stop recommending it.
 
 ## Runtime Routing for Company Discovery
 
-The app default for company discovery is the local company proposal path:
-create/read proposal batches with `/api/discovery/company-proposals` and decide
-them with `/api/discovery/company-proposal-decisions`. Bounded AI may supply
-company seed judgment only; seed output is advisory until deterministic
-validation, resolver/scanner/gate checks, and confirm-first source config writes
-through `careerrat companies` or the DB/source-config owners approve it.
+Company discovery runs through the `discover-companies` skill. It finds
+candidate employers, and the agent resolves, validates and dedupes them before
+anything is written. Bounded AI may supply company seed judgment only
+(`src/core/discovery/company-seeds.mjs`); seed output is advisory until
+deterministic validation and resolver/scanner/gate checks approve it.
 
-Local proposal errors do not silently start chat, `/api/chat/*`, the full skill
-runtime, or `POST /api/skill/run`; they surface locally with manual input, retry,
-or no-AI fallback paths. `/api/discovery/quick-start` and
-`/api/discovery/next` are explicit user-selected chat handoffs that start or
-reuse visible `/api/chat/*` sessions. `POST /api/skill/run` remains the retained
-allowlisted full skill runtime for tool-heavy, long-running, or human-watched
-workflows, not the default app path for proposal creation, proposal decisions,
-deterministic validation, dedupe, or confirmed writes.
+`careerrat companies` is only the tracked-company source-config helper. It lists
+(default), adds (`--add "<name>" --url "<url>"`, dry-run unless `--write`) and
+removes (`--remove "<name>" --write`) entries, in SQLite for DB workspaces and
+`config/sourced-scan.json` otherwise. `--add` and `--remove` only preview
+without `--write`. It does not create or decide candidate lists. Run it from
+`discover-companies`, which adds validated high-confidence boards right away
+and reviews only ambiguous or unsupported ones.
+
+Errors surface locally with manual input, retry, or no-AI fallback paths rather
+than silently starting chat. Visible agent sessions in the terminal workspace
+are explicit user-selected handoffs. The allowlisted full skill runtime
+(`src/core/ai/skill-runtime.mjs`) remains for tool-heavy, long-running, or
+human-watched workflows.
 
 ## Keeping Current
 
@@ -213,9 +212,9 @@ tarball extract so your `candidate/` and `workspace/` data are never touched.
 
 The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`
 to `.internal/ai.env` (see Path Resolution above for how that resolves). The
-value is chmod `0600`, loaded at server boot, and never echoed back by the API.
+value is chmod `0600`, loaded at startup, and never echoed back.
 
-## Dashboard Dev Server Contract
+## Terminal Workspace Contract
 
 **Terminal workspace exception.** When `CAREERRAT_SURFACE=tui`, the persistent
 terminal workspace owns the live view. Do not start `tracker-dev`, open a
@@ -272,46 +271,17 @@ what was saved and the affected record. For DB captures, mark the intake item do
 through `careerrat data intake update` only after its owning write is verified;
 keep blocked items at needs_you with their reason and artifact references.
 
-Legacy workspaces retain their skill flow without an implicit DB migration. The server instructions below apply to the
-existing browser entry while its retirement is in progress.
+Legacy workspaces retain their skill flow without an implicit DB migration.
 
-The dashboard is part of the live CareerRat workspace, not a one-off artifact. In
-any active job-search session, make sure `careerrat tracker-dev` is serving the
-tracker before telling the user to open the dashboard.
+The browser workspace is retired. `careerrat tracker-dev` and `careerrat start
+--browser` now print a retired message and exit 1, so never start or point the
+user at a local server or `http://localhost:7777`. `careerrat start` opens the
+terminal workspace. After changing tracker-visible data, run `careerrat tracker`
+when a recovery snapshot and summary are needed.
 
-- `careerrat start` opens the terminal workspace and does not serve the browser
-  app. The legacy browser app starts with `careerrat start --browser` (or
-  `careerrat tracker-dev`), which records `.internal/tracker-dev.pid` plus
-  `.internal/tracker-dev.log`. Agents opened directly in the repo must perform
-  the same check themselves.
-- Check `http://localhost:7777` first. If it is down, start the server from the
-  repo root.
-- For agent-run sessions, start it detached so it survives the current terminal
-  turn:
-
-  ```bash
-  mkdir -p .internal
-  nohup careerrat tracker-dev > .internal/tracker-dev.log 2>&1 &
-  echo $! > .internal/tracker-dev.pid
-  ```
-
-- If port 7777 is in use, verify whether it is already CareerRat. If it is not,
-  start with another port, for example `careerrat tracker-dev --port 7778`, and
-  tell the user the actual URL.
-- After changing tracker-visible data, keep the app server running so the open
-  React shell receives the update. Run `careerrat tracker` when a recovery
-  snapshot and summary are needed; it no longer publishes a second dashboard.
-- **Live data updates are event-driven, not a poll.** `careerrat tracker-dev`
-  watches `workspace/tracker.json` and `workspace/activity.jsonl` with
-  `fs.watch`, then pushes typed `tracker-update` or `activity-update`
-  Server-Sent Events. The React shell reloads canonical data from those events;
-  the server does not run a child renderer or rebuild HTML.
-- **There is one dashboard.** The old static tracker page is retired. For every
-  live session, point the user at `careerrat tracker-dev`
-  (`http://localhost:7777`).
-- The app writes supported local actions through the canonical domain layer.
-  Agents and skills own longer or tool-heavy workflows. No surface hand-edits
-  generated `workspace/tracker.json` in a database-backed workspace.
+The workspace writes supported local actions through the canonical domain layer.
+Agents and skills own longer or tool-heavy workflows. No surface hand-edits
+generated `workspace/tracker.json` in a database-backed workspace.
 
 ## Actionability Write-Back Contract
 
@@ -463,8 +433,7 @@ verbs), then exports — do not repeat these by hand in DB mode:
   `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
 - **Export to legacy files**, immediately after commit: `workspace/tracker.json` +
   `workspace/activity.jsonl` are regenerated for compatibility and recovery.
-  If `careerrat tracker-dev` is running, its `fs.watch` on `tracker.json` picks
-  this up and live-reloads. Run `careerrat tracker` only when a separate recovery
+  Run `careerrat tracker` only when a separate recovery
   snapshot and summary are useful.
 - **`app set-status`** applies the interview round-completion clearing
   automatically (nulls `nextInterviewAt`/`interviewNote`, and `interviewAt` too
@@ -1123,9 +1092,9 @@ under `workspace/research/`: company intel (`<slug>.md`), market comp benchmarks
 - **Privacy.** Research artifacts are treated as outbound; `current_base` never
   appears in any of them. Comp benchmarks are market data only.
 
-## Activity Pulse (the dashboard feed)
+## Activity Pulse (the activity feed)
 
-The Command Center's marquee panel is the **Activity Pulse** — a reverse-chronological
+The terminal workspace's Activity tab shows the **Activity Pulse** — a reverse-chronological
 "what the agent did + what happened" timeline. It renders from an append-only feed at
 `workspace/activity.jsonl` (gitignored runtime data), so it must reflect real work, not
 the demo data it shipped with. **Every skill that makes a tracker-visible change logs one
@@ -1135,7 +1104,7 @@ portal advances and logs the matching event in that transaction.
 
 - **Mechanism — use the `activity` helper, don't hand-write JSONL.** Skills call
   `careerrat activity append --type <type> --title "…"` rather than editing the feed in
-  prose — the dashboard/CLI only RENDER it. The append is a **dry run** by default
+  prose — the terminal workspace and CLI only RENDER it. The append is a **dry run** by default
   (canonicalizes, schema-validates, lint/leak-checks, prints the line it would write);
   add `--write` to commit. It is **idempotent** on a content-derived id, so re-logging the
   same event never double-writes. Options: `--summary "…"`, `--actor agent|world`,
@@ -1194,7 +1163,7 @@ portal advances and logs the matching event in that transaction.
   action cell stays blank (`appHasContactPath` in `cadence.mjs`, `hasContactPath` in
   `dashboard-data.js`). For such a row the real move is `relationship-sourcing` (find a
   contact first) or a plain wait/archive call — never a follow-up drafted to no one.
-- **Honesty + privacy (hard).** The feed renders on the dashboard, so it is **outbound**:
+- **Honesty + privacy (hard).** The feed renders in the terminal workspace, so it is **outbound**:
   every event is schema-validated against `config/activity-event.schema.json`, refused if
   its prose carries placeholder residue, and refused if it names the private `current_base`
   field. Log only what actually happened — the feed is an audit trail, not a highlight reel.
@@ -1335,7 +1304,7 @@ loops so prep compounds instead of restarting each round.
   thin spots — bank it now, never gate on a missing detail. Record each gap (a metric
   to confirm, a concrete before/after, a detail that conflicts with committed code) as
   an `open_questions[]` string on the story. `add --write` auto-mirrors `open_questions`
-  into `tracker.storyEnrichment`, which the local app renders as a
+  into `tracker.storyEnrichment`, which the terminal workspace renders as a
   self-clearing **"give me more context"** card in the Next Steps queue (one per thin
   story). The story's `open_questions` is the source of truth; `tracker.storyEnrichment`
   is the derived browser-side mirror. Clearing a story's `open_questions` and re-`add

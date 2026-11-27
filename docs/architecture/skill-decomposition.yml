@@ -11,7 +11,7 @@ owner_types:
   existing_ts_module: "A checked-in JavaScript module that owns reusable runtime logic today."
   planned_ts_module: "A future JavaScript module path, prefixed with planned:src/ or planned:scripts/."
   planned_policy: "A named future policy, epic, consent surface, or migration slice that is not yet a module path."
-  api_route: "A local HTTP route mounted by tracker-dev or a planned route module."
+  api_route: "A planned route module (the HTTP routes served by tracker-dev were removed in v0.26.0)."
   db_verb: "A SQLite-backed data or source-config verb that owns durable mutations."
   cli_command: "A CLI surface used by skills, agents, or app routes."
   retained_skill_runtime: "The existing SKILL.md, chat runtime, or skill runtime kept for full agent workflows."
@@ -183,12 +183,6 @@ skills:
           - "D-02"
           - "D-10"
           - "D-11"
-      - step: "Present high-confidence and borderline company proposals before writes; keep unsupported pages as cached intel until generic extraction can use them."
-        owner: "src/cli/discovery-route.mjs"
-        owner_type: "api_route"
-        decisions:
-          - "D-13"
-          - "D-14"
       - step: "Write confirmed supported ATS companies through the current companies CLI and source-config verb."
         owner: "src/cli/companies.mjs"
         owner_type: "cli_command"
@@ -299,12 +293,6 @@ skills:
         decisions:
           - "D-09"
           - "D-12"
-      - step: "Expose the deterministic scan route for app search controls."
-        owner: "src/cli/search-route.mjs"
-        owner_type: "api_route"
-        decisions:
-          - "D-02"
-          - "D-12"
       - step: "Read source config and watermarks through source-config owners."
         owner: "src/core/db/verbs/source-config.mjs"
         owner_type: "db_verb"
@@ -363,11 +351,6 @@ skills:
       - step: "Run the product packet gate for a known application through the local packet API before packet generation."
         owner: "src/core/packet/gate.mjs"
         owner_type: "existing_ts_module"
-        decisions:
-          - "D-12"
-      - step: "Expose packet gate execution through POST /api/packet/gate for app-default packet flows."
-        owner: "src/cli/packet-route.mjs"
-        owner_type: "api_route"
         decisions:
           - "D-12"
     bounded_ai:
@@ -483,11 +466,6 @@ skills:
         owner_type: "db_verb"
         decisions:
           - "D-12"
-      - step: "Expose ordinary packet generation and export through POST /api/packet/generate and POST /api/packet/export."
-        owner: "src/cli/packet-route.mjs"
-        owner_type: "api_route"
-        decisions:
-          - "D-12"
       - step: "Export user-facing packet files as PDF by default and DOCX only when selected or required by captured upload metadata."
         owner: "src/core/packet/exports.mjs"
         owner_type: "existing_ts_module"
@@ -523,7 +501,7 @@ skills:
         decisions:
           - "D-07"
     notes:
-      - "Ordinary product packet generation does not call tailor-application through POST /api/skill/run."
+      - "Ordinary product packet generation does not call tailor-application through the full skill runtime."
       - "Generated tracker and activity files are compatibility exports, not packet source of truth."
   answer-question:
     source: ".agents/skills/answer-question/SKILL.md"
@@ -539,11 +517,6 @@ skills:
       - step: "Reuse provider/manual question parsing for Greenhouse, Ashby, and pasted application text."
         owner: "src/core/apply/form-questions.mjs"
         owner_type: "existing_ts_module"
-        decisions:
-          - "D-12"
-      - step: "Expose question capture and one-off local answer drafting through POST /api/packet/questions and POST /api/packet/answers."
-        owner: "src/cli/packet-route.mjs"
-        owner_type: "api_route"
         decisions:
           - "D-12"
     bounded_ai:
@@ -571,7 +544,7 @@ skills:
         decisions:
           - "D-07"
     notes:
-      - "Ordinary one-off answer drafting in the app uses local packet answers, not answer-question through POST /api/skill/run."
+      - "Ordinary one-off answer drafting in the app uses local packet answers, not answer-question through the full skill runtime."
       - "EEO, disability, veteran, demographic, and voluntary self-identification prompts are skipped metadata, not generated answers."
   email-comms:
     source: ".agents/skills/email-comms/SKILL.md"

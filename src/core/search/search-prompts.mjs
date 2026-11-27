@@ -287,7 +287,7 @@ export function buildSearchPromptContext({
   return context;
 }
 
-export function buildSearchPromptInputFingerprint({
+function buildSearchPromptInputFingerprint({
   repoRoot,
   env,
   config,

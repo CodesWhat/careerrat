@@ -10,7 +10,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { buildCoachingPlan } from "../src/core/coaching/plan.mjs";
 import { coachingPlanSchema } from "../src/core/coaching/schemas.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
@@ -357,6 +356,11 @@ test("buildCoachingPlan degrades to a manual reviewable plan on NO_AI_ROUTE with
   assert.equal(plan.gaps.length, 1);
   assert.equal(plan.gaps[0].suggestion.kind, "no-close-path");
   assert.equal(plan.gaps[0].suggestion.draftClaim, null);
+  // Building a plan never saves one: the no-route result stays a reviewable reply.
+  const row = openDb({ repoRoot, env: {} })
+    .prepare("SELECT data FROM applications WHERE id = ?")
+    .get("app-coach");
+  assert.equal(JSON.parse(row.data).coachingPlan, undefined);
 });
 
 test("buildCoachingPlan refuses to run on a keep verdict (nothing named to coach)", async () => {
@@ -401,66 +405,24 @@ test("buildCoachingPlan returns NOT_FOUND for an unknown applicationId", async (
   assert.equal(result.body.code, "NOT_FOUND");
 });
 
-test("coaching.plan with no AI route reports why and saves nothing, instead of storing a placeholder plan", async () => {
-  const repoRoot = tempRepo();
-  seedReviewApp(repoRoot);
-
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: { type: "coaching.plan", entity: { type: "application", id: "app-coach" } },
-      // The real plan builder; only the AI provider answers "no route".
-      buildCoachingPlanImpl: (input) =>
-        buildCoachingPlan({
-          ...input,
-          runAI: async () => ({
-            body: {
-              ok: false,
-              code: "NO_AI_ROUTE",
-              error: { message: "No AI route is configured for this bounded assist." },
-              ai: { used: false },
-            },
-          }),
-        }),
-    }),
-    (error) => {
-      assert.equal(error.code, "NO_AI_ROUTE");
-      assert.match(error.message, /No AI route is configured/);
-      return true;
-    }
-  );
-  const row = openDb({ repoRoot, env: {} })
-    .prepare("SELECT data FROM applications WHERE id = ?")
-    .get("app-coach");
-  assert.equal(JSON.parse(row.data).coachingPlan, undefined);
-});
-
-test("job.evaluate with no AI route says it could not evaluate and offers no Coach or Approve", async () => {
+test("evaluate with no AI route returns a manual verdict with no fit score", async () => {
   const repoRoot = tempRepo();
   seedReviewApp(repoRoot, { evaluation: null });
 
-  const result = await executeWorkspaceIntent({
+  const result = await evaluateAndPersistPacketGate({
     repoRoot,
     env: {},
-    intent: { type: "job.evaluate", entity: { type: "application", id: "app-coach" } },
-    // The real gate and persistence; only the AI call reports "no route".
-    evaluateJobImpl: (input) =>
-      evaluateAndPersistPacketGate({
-        ...input,
-        invoke: async () => {
-          const err = new Error("no AI route configured");
-          err.code = "NO_AI_ROUTE";
-          throw err;
-        },
-      }),
+    body: { applicationId: "app-coach" },
+    invoke: async () => {
+      const err = new Error("no AI route configured");
+      err.code = "NO_AI_ROUTE";
+      throw err;
+    },
   });
-
-  const reply = result.messages.at(-1);
-  assert.equal(reply.metadata.manualRequired, true);
-  assert.match(reply.text, /Could not evaluate/);
-  assert.doesNotMatch(reply.text, /^Evaluated/);
-  const labels = (reply.metadata.nextActions || []).map((action) => action.label);
-  assert.ok(!labels.includes("Coach me on this fit"), labels.join(", "));
-  assert.ok(!labels.includes("Approve review and prepare"), labels.join(", "));
+  assert.equal(result.status, 200);
+  const evaluation = result.body.data;
+  assert.equal(evaluation.manual.required, true);
+  assert.equal(evaluation.manual.code, "NO_AI_ROUTE");
+  assert.equal(evaluation.action, "manual");
+  assert.equal(evaluation.fitScore, null);
 });

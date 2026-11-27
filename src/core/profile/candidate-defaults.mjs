@@ -14,7 +14,7 @@
 // so writes the persona to disk alongside whatever field the candidate
 // actually saved). Both the SQLite-backed candidate verbs
 // (src/core/db/verbs/candidate.mjs) and the legacy/YAML-mode onboarding
-// routes (src/cli/onboard-route.mjs's readBaseDoc()) use this module as
+// routes (the retired onboard route's readBaseDoc()) use this module as
 // their one shared source of "empty," so the two modes agree on what
 // "nothing answered yet" looks like.
 export const CANDIDATE_DEFAULTS = Object.freeze({
@@ -174,8 +174,3 @@ export function normalizeCandidateProfile(profile = {}) {
  * @param {object} doc
  * @returns {boolean}
  */
-export function isCandidateDefault(name, doc) {
-  const defaultDoc = CANDIDATE_DEFAULTS[name];
-  if (!defaultDoc) return false;
-  return JSON.stringify(doc) === JSON.stringify(defaultDoc);
-}

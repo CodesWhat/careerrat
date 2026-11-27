@@ -27,7 +27,7 @@ function firstPackedPackage(json) {
 }
 
 test("npm pack ships the bundled example-echo plugin (manifest + entry)", () => {
-  // --ignore-scripts skips the "prepack" build of apps/web — this test only
+  // --ignore-scripts keeps the pack from running lifecycle scripts — this test only
   // cares about which paths package.json's `files` allowlist ships, not
   // about producing a real tarball.
   const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {

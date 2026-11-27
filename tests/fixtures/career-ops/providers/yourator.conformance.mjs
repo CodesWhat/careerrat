@@ -1,8 +1,4 @@
-// tests/providers/yourator.test.mjs — new fixture authored 2026-08-23 when
-// yourator moved out of CAREER_OPS_DEFERRED_PROVIDER_IDS. Sample payloads
-// below are invented and domain-neutral (no real employers, no real people) —
-// this provider's own API carries real third-party posting content, so
-// nothing here is a captured live sample.
+// tests/providers/yourator.test.mjs — mirrors the remotli/arbeitnow board-wide provider tests.
 
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -20,13 +16,14 @@ try {
   if (yourator.id === "yourator") pass('yourator.id is "yourator"');
   else fail(`yourator.id is ${JSON.stringify(yourator.id)}`);
 
-  // resolveYouratorUrl — Source Indexing Policy rule 2: prefer the employer's
-  // own ATS page over the board page.
+  // --- resolveYouratorUrl — Source Indexing Policy rule 2 -------------------
+
+  // thirdPartyUrl (the employer's ATS) wins over the board page.
   const employer = resolveYouratorUrl({
-    path: "/companies/northbridge-logistics/jobs/1",
-    thirdPartyUrl: "https://northbridge.breezy.hr/job/abc",
+    path: "/companies/HourLoop/jobs/1",
+    thirdPartyUrl: "https://hourloophr.teamdoor.io/job/abc",
   });
-  if (employer === "https://northbridge.breezy.hr/job/abc") {
+  if (employer === "https://hourloophr.teamdoor.io/job/abc") {
     pass("resolveYouratorUrl prefers thirdPartyUrl over the board page (rule 2)");
   } else {
     fail(`resolveYouratorUrl employer url = ${JSON.stringify(employer)}`);
@@ -34,17 +31,17 @@ try {
 
   // utm_* ad params are stripped; functional params survive.
   const stripped = resolveYouratorUrl({
-    path: "/companies/meridian-staffing/jobs/2",
+    path: "/companies/AmazingTalker/jobs/2",
     thirdPartyUrl:
-      "https://meridian.breezy.hr/p/b76848?utm_source=yourator&utm_medium=ads&UTM_Campaign=general&ref=keep",
+      "https://amazingtalker.breezy.hr/p/b76848?utm_source=yourator&utm_medium=ads&UTM_Campaign=general&ref=keep",
   });
-  if (stripped === "https://meridian.breezy.hr/p/b76848?ref=keep") {
+  if (stripped === "https://amazingtalker.breezy.hr/p/b76848?ref=keep") {
     pass("resolveYouratorUrl strips utm_* (case-insensitively) and keeps functional params");
   } else {
     fail(`resolveYouratorUrl stripped url = ${JSON.stringify(stripped)}`);
   }
 
-  // non-https / malformed thirdPartyUrl -> fall back to the board page.
+  // non-https / malformed thirdPartyUrl → fall back to the board page.
   const fallbacks = [
     resolveYouratorUrl({ path: "/companies/x/jobs/3", thirdPartyUrl: "http://insecure.example/j" }),
     resolveYouratorUrl({ path: "/companies/x/jobs/3", thirdPartyUrl: "not a url" }),
@@ -72,37 +69,35 @@ try {
     fail(`resolveYouratorUrl escapes = ${JSON.stringify(escapes)}`);
   }
 
-  // normalizeYouratorJob — offer mapping (title/url/company/location), a
-  // non-ASCII title trimmed unmangled (this board serves Taiwanese postings),
-  // and the fallback/drop cases.
+  // --- normalizeYouratorJob ------------------------------------------------
+
   const full = normalizeYouratorJob(
     {
-      id: 100001,
-      name: "  倉儲管理專員 Warehouse Supervisor  ",
-      path: "/companies/northbridge-logistics/jobs/100001",
-      salary: "NT$ 45,000 - 60,000 (月薪)",
+      id: 22295,
+      name: "  【AmazingTalker】法務專員｜Legal Specialist  ",
+      path: "/companies/AmazingTalker/jobs/22295",
+      salary: "NT$ 50,000 - 80,000 (月薪)",
       lastActiveAt: "一天內更新",
-      location: "  臺北市  ",
-      company: { brand: "  Northbridge Logistics  " },
+      location: "  新北市  ",
+      company: { brand: "  AmazingTalker  " },
     },
     "Fallback"
   );
   if (
     full &&
-    full.title === "倉儲管理專員 Warehouse Supervisor" &&
-    full.url === "https://www.yourator.co/companies/northbridge-logistics/jobs/100001" &&
-    full.company === "Northbridge Logistics" &&
-    full.location === "臺北市"
+    full.title === "【AmazingTalker】法務專員｜Legal Specialist" &&
+    full.url === "https://www.yourator.co/companies/AmazingTalker/jobs/22295" &&
+    full.company === "AmazingTalker" &&
+    full.location === "新北市"
   ) {
-    pass("normalizeYouratorJob maps + trims name/path/company.brand/location (offer mapping)");
+    pass("normalizeYouratorJob maps + trims name/path/company.brand/location");
   } else {
     fail(`normalizeYouratorJob full row = ${JSON.stringify(full)}`);
   }
-  if (full && !("postedAt" in full)) {
+
+  if (full && !("postedAt" in full))
     pass("normalizeYouratorJob never emits postedAt (no absolute date in the payload)");
-  } else {
-    fail(`normalizeYouratorJob postedAt presence = ${JSON.stringify(full)}`);
-  }
+  else fail(`normalizeYouratorJob postedAt presence = ${JSON.stringify(full)}`);
 
   const coFromEntry = normalizeYouratorJob(
     { name: "T", path: "/companies/x/jobs/1", company: { brand: "  " } },
@@ -110,12 +105,16 @@ try {
   );
   const coDefault = normalizeYouratorJob({ name: "T", path: "/companies/x/jobs/2" });
   if (coFromEntry?.company === "Entry Name" && coDefault?.company === "Yourator") {
-    pass('normalizeYouratorJob falls back company -> entry name -> "Yourator"');
+    pass('normalizeYouratorJob falls back company → entry name → "Yourator"');
   } else {
     fail(
       `normalizeYouratorJob company fallbacks = ${JSON.stringify({ a: coFromEntry?.company, b: coDefault?.company })}`
     );
   }
+
+  const noLoc = normalizeYouratorJob({ name: "T", path: "/companies/x/jobs/3" });
+  if (noLoc?.location === "") pass("normalizeYouratorJob yields an empty location when absent");
+  else fail(`normalizeYouratorJob missing location = ${JSON.stringify(noLoc?.location)}`);
 
   const drops = [
     normalizeYouratorJob({ name: "", path: "/companies/x/jobs/d1" }),
@@ -130,8 +129,8 @@ try {
     fail(`normalizeYouratorJob drops = ${JSON.stringify(drops)}`);
   }
 
-  // fetch() — pagination stops on hasMore:false (never a page-length
-  // heuristic), drops unusable rows, and pins the request (redirect:error).
+  // --- fetch() -------------------------------------------------------------
+
   const mk = (i) => ({
     name: `Role ${i}`,
     path: `/companies/co/jobs/${i}`,
@@ -152,17 +151,15 @@ try {
     3: { payload: { hasMore: true, jobs: [mk(99)] } }, // must never be requested
   };
   const requested = [];
-  const jobs = await yourator.fetch(
-    { name: "Yourator" },
-    {
-      transport: "http",
-      sleep: async () => {},
-      fetchJson: async (url, opts) => {
-        requested.push({ url, redirect: opts?.redirect });
-        return pages[Number(new URL(url).searchParams.get("page"))];
-      },
-    }
-  );
+  const ctx = {
+    transport: "http",
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      requested.push({ url, redirect: opts?.redirect });
+      return pages[Number(new URL(url).searchParams.get("page"))];
+    },
+  };
+  const jobs = await yourator.fetch({ name: "Yourator" }, ctx);
   const urls = requested.map((r) => r.url);
   if (
     jobs.length === 39 &&
@@ -175,11 +172,14 @@ try {
       'yourator.fetch paginates ?page=N, stops on hasMore:false, drops bad rows, sends redirect:"error"'
     );
   } else {
-    fail(`yourator.fetch pagination = ${JSON.stringify({ count: jobs.length, urls })}`);
+    fail(
+      `yourator.fetch pagination = ${JSON.stringify({ count: jobs.length, urls, redirects: requested.map((r) => r.redirect) })}`
+    );
   }
 
   // Regression: a SHORT intermediate page with hasMore:true must NOT stop the
-  // walk. hasMore is the API's own end-of-board signal, not a page-length one.
+  // walk. hasMore is the API's own end-of-board signal; a page-length heuristic
+  // would silently truncate the board (CodeRabbit, PR #3030).
   const shortPages = {
     1: { payload: { hasMore: true, jobs: [mk(0), mk(1), mk(2)] } }, // 3 < 20, but hasMore:true
     2: { payload: { hasMore: true, jobs: Array.from({ length: 20 }, (_, i) => mk(10 + i)) } },
@@ -205,8 +205,7 @@ try {
     );
   }
 
-  // ctx.maxPages (health probe) wins over max_pages on the entry — pacing/
-  // config metadata consistency with the rest of the pinned adapters.
+  // ctx.maxPages (health probe) wins over max_pages on the entry.
   const probed = [];
   await yourator.fetch(
     { name: "Yourator", max_pages: 50 },

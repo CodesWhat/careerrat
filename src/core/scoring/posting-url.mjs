@@ -31,6 +31,13 @@ export function normalizePostingUrl(raw) {
     for (const key of [...url.searchParams.keys()]) {
       if (isTrackingKey(key)) url.searchParams.delete(key);
     }
+    // PeopleSoft: the PostingSeq that answered is a fetch detail, not part of the
+    // opening. Identity is the tenant plus JobOpeningId.
+    if ([...url.searchParams.keys()].some((key) => key.toLowerCase() === "jobopeningid")) {
+      for (const key of [...url.searchParams.keys()]) {
+        if (key.toLowerCase() === "postingseq") url.searchParams.delete(key);
+      }
+    }
     url.searchParams.sort();
     url.hash = "";
     if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/u, "") || "/";

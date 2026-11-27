@@ -62,11 +62,6 @@ test("only the public website/docs builds opt into the PostHog ingest proxy", ()
   ).scripts.build;
   assert.match(websiteBuild, /--allow-posthog-proxy/);
   assert.match(docsBuild, /--allow-posthog-proxy/);
-
-  // The local-first app server must never gain a network egress point to an
-  // external analytics host. connect-src stays 'self' there.
-  const trackerDev = readFileSync(new URL("../src/cli/tracker-dev.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(trackerDev, /extraConnectSrc|extraScriptSrc|e\.codeswhat\.com/);
 });
 
 test("the PostHog build flag permits its loader and ingest requests", (t) => {
@@ -93,11 +88,7 @@ test("the PostHog build flag permits its loader and ingest requests", (t) => {
   assert.match(csp, /connect-src [^;]*https:\/\/e\.codeswhat\.com/);
 });
 
-test("Vite uses no inline theme bootstrap and Vercel enforces headers", () => {
-  const appIndex = readFileSync(new URL("../apps/web/index.html", import.meta.url), "utf8");
-  assert.doesNotMatch(appIndex, /<script(?![^>]*\bsrc=)[^>]*>/i);
-  assert.doesNotMatch(appIndex, /theme-init\.js/);
-
+test("Vercel enforces security headers on the website", () => {
   const vercel = JSON.parse(
     readFileSync(new URL("../apps/website/vercel.json", import.meta.url), "utf8")
   );

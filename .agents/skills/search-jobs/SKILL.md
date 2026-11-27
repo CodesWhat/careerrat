@@ -376,7 +376,7 @@ Report the summary. List any issues found. Snapshot tracker state:
 careerrat tracker
 ```
 
-Then log the source run to the Activity Pulse feed (the dashboard's live timeline — see
+Then log the source run to the Activity Pulse feed (the terminal workspace's activity log — see
 **Activity Pulse** in AGENTS.md). One summary event per source run, not per role:
 
 ```

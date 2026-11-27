@@ -288,7 +288,7 @@ Route each gate type through its owning command:
 - Per-application follow-up pause → `workspace/tracker.json` (that record's
   `nextAction`/`nextActionDue`)
 
-Then log each inbound thread to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
+Then log each inbound thread to the Activity Pulse feed (the terminal workspace's activity log — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
 
 ```
 careerrat activity append --type message --actor world \

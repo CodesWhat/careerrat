@@ -301,7 +301,7 @@ test("resolveAIRoute: selected installed CLI wins in desktop even when a provide
   try {
     writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      { CAREERRAT_INSTALLED_AI: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
         runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
@@ -336,7 +336,7 @@ test("resolveAIRoute: carries the selected runtime's verified capability evidenc
     });
 
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { CAREERRAT_INSTALLED_AI: "1" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -385,7 +385,7 @@ test("resolveAIRoute: strips exactRead/publicWeb from persisted evidence tested 
     });
 
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { CAREERRAT_INSTALLED_AI: "1" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -432,7 +432,7 @@ test("resolveAIRoute: rehydrates exactRead/publicWeb when the cache was tested a
     });
 
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { CAREERRAT_INSTALLED_AI: "1" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -470,7 +470,7 @@ test("resolveAIRoute: dispatches a completion-ready runtime with unrelated capab
       });
 
       const route = resolveAIRoute(
-        { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+        { CAREERRAT_INSTALLED_AI: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
         {
           repoRoot: root,
           runtimeInventory: [
@@ -505,7 +505,7 @@ test("resolveAIRoute: rejects a selected runtime without verified completion", (
     });
 
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      { CAREERRAT_INSTALLED_AI: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -533,7 +533,7 @@ test("resolveAIRoute: dispatches verified Claude and Codex runtimes", () => {
     try {
       writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId });
       const route = resolveAIRoute(
-        { CAREERRAT_DESKTOP_SHELL: "1" },
+        { CAREERRAT_INSTALLED_AI: "1" },
         {
           repoRoot: root,
           runtimeInventory: [verifiedInstalled(runtimeId, name, `/safe/${runtimeId}`)],
@@ -558,7 +558,7 @@ test("resolveAIRoute: rejects persisted evidence when the selected executable pa
       verification: runtimeVerification("/safe/codex-old"),
     });
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { CAREERRAT_INSTALLED_AI: "1" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -586,7 +586,7 @@ test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
       providerFallback: true,
     });
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      { CAREERRAT_INSTALLED_AI: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
         runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
@@ -598,38 +598,12 @@ test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
   }
 });
 
-test("resolveAIRoute: packaged desktop refuses provider fallback without a selected CLI", () => {
-  const root = tempRoot();
-  try {
-    writeInstalledRuntimeSelection({
-      repoRoot: root,
-      env: {},
-      runtimeId: null,
-      providerFallback: true,
-    });
-    const route = resolveAIRoute(
-      {
-        CAREERRAT_DESKTOP_SHELL: "1",
-        CAREERRAT_DESKTOP_CLI_ONLY: "1",
-        ANTHROPIC_API_KEY: "sk-ant-test",
-      },
-      { repoRoot: root, runtimeInventory: [] }
-    );
-    assert.equal(route.type, "none");
-    assert.match(route.error, /select/i);
-    assert.match(route.error, /ready/i);
-    assert.doesNotMatch(route.error, /Advanced provider fallback/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("resolveAIRoute: packaged desktop rejects a selected CLI that is no longer installed", () => {
   const root = tempRoot();
   try {
     writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
     const route = resolveAIRoute(
-      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      { CAREERRAT_INSTALLED_AI: "1" },
       { repoRoot: root, runtimeInventory: [] }
     );
     assert.equal(route.type, "none");
@@ -648,8 +622,7 @@ test("resolveAIRoute: packaged desktop resolves a selected CLI without repeating
     for (let index = 0; index < 3; index += 1) {
       const route = resolveAIRoute(
         {
-          CAREERRAT_DESKTOP_SHELL: "1",
-          CAREERRAT_DESKTOP_CLI_ONLY: "1",
+          CAREERRAT_INSTALLED_AI: "1",
           ANTHROPIC_API_KEY: "sk-ant-test",
         },
         {
@@ -690,7 +663,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
       outputMode: "native",
       effort: "high",
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_INSTALLED_AI: "1" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -736,7 +709,7 @@ test("callAI (installed): an explicit model always wins", async () => {
       tier: "smallFast",
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      env: { CAREERRAT_INSTALLED_AI: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -763,7 +736,7 @@ test("callAI resolves the same product policy into Claude and Codex model flags"
         aiOperation: "research.web",
         messages: [{ role: "user", content: "find roles" }],
         root,
-        env: { CAREERRAT_DESKTOP_SHELL: "1" },
+        env: { CAREERRAT_INSTALLED_AI: "1" },
         runtimeInventory: [verifiedInstalled(runtimeId, runtimeId, `/safe/${runtimeId}`)],
         runInstalledRuntimeImpl: async (input) => {
           calls.push(input);
@@ -785,7 +758,7 @@ test("callAI resolves the same product policy into Claude and Codex model flags"
 test("callAI applies saved preferences only when it creates a new execution plan", async () => {
   const root = tempRoot();
   try {
-    const env = { CAREERRAT_DESKTOP_SHELL: "1" };
+    const env = { CAREERRAT_INSTALLED_AI: "1" };
     writeInstalledRuntimeSelection({ repoRoot: root, env, runtimeId: "codex" });
     writeAIPreferences({
       repoRoot: root,
@@ -845,7 +818,7 @@ test("callAI rejects a frozen plan when the selected runtime changed", async () 
         },
         messages: [{ role: "user", content: "find roles" }],
         root,
-        env: { CAREERRAT_DESKTOP_SHELL: "1" },
+        env: { CAREERRAT_INSTALLED_AI: "1" },
         runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
         runInstalledRuntimeImpl: async () => ({ text: "wrong runtime", usage: null }),
       }),
@@ -871,7 +844,7 @@ test("callAI can execute a server-owned frozen plan after the selected runtime c
       useExecutionPlanRoute: true,
       messages: [{ role: "user", content: "find roles" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_INSTALLED_AI: "1" },
       runtimeInventory: [
         verifiedInstalled("claude", "Claude Code", "/safe/claude"),
         verifiedInstalled("codex", "Codex", "/safe/codex"),
@@ -956,7 +929,7 @@ test("callAI (installed): tier smallFast on the claude runtime resolves config/a
       tier: "smallFast",
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      env: { CAREERRAT_INSTALLED_AI: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
       runtimeInventory: [verifiedInstalled("claude", "Claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -979,7 +952,7 @@ test("callAI (installed): tier smallFast on the claude runtime with no config fi
       tier: "smallFast",
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_INSTALLED_AI: "1" },
       runtimeInventory: [verifiedInstalled("claude", "Claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -1008,7 +981,7 @@ test("callAI (installed): tier smallFast on a non-claude runtime ignores the Ant
       tier: "smallFast",
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      env: { CAREERRAT_INSTALLED_AI: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -1031,7 +1004,7 @@ test("callAI (installed): tier smallFast on a non-claude runtime with no base de
       tier: "smallFast",
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_INSTALLED_AI: "1" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
@@ -1053,7 +1026,7 @@ test("callAI (installed): no model/tier falls back to CAREERRAT_INSTALLED_AI_MOD
     await callAI({
       messages: [{ role: "user", content: "hi" }],
       root,
-      env: { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
+      env: { CAREERRAT_INSTALLED_AI: "1", CAREERRAT_INSTALLED_AI_MODEL: "base-default" },
       runtimeInventory: [verifiedInstalled("codex", "Codex", "/safe/codex")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);

@@ -1346,7 +1346,7 @@ function confirmedLaneTable(lane) {
 // what lets this verb update the row in place by reusing putRow with the
 // SAME id, rather than needing separate UPDATE SQL or any special-cased
 // upsert-vs-insert branching.
-export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields } = {}) {
+export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields, guard } = {}) {
   const rowId = String(id || "").trim();
   if (!rowId) throw makeError("deepIngestConfirmedItemUpdate requires id");
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
@@ -1366,6 +1366,9 @@ export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields 
 
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     const current = requireRow(db, table, rowId, "Deep ingest confirmed item");
+    if (guard && !guard(current)) {
+      throw makeError("Deep ingest confirmed item changed since it was read", "CONFLICT");
+    }
     const updatedAt = nowIso();
     const next = {
       ...clone(current),
@@ -1432,14 +1435,17 @@ export function deepIngestConfirmedItemUpsert({ repoRoot, env, lane, id, fields 
 // Remove exactly one confirmed reference-library row by {lane, id}. A clean
 // NOT_FOUND on an unknown id (via requireRow), same convention as every
 // other by-id lookup in this file.
-export function deepIngestConfirmedItemRemove({ repoRoot, env, lane, id } = {}) {
+export function deepIngestConfirmedItemRemove({ repoRoot, env, lane, id, guard } = {}) {
   const rowId = String(id || "").trim();
   if (!rowId) throw makeError("deepIngestConfirmedItemRemove requires id");
 
   const { lane: normalizedLane, table } = confirmedLaneTable(lane);
 
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
-    requireRow(db, table, rowId, "Deep ingest confirmed item");
+    const current = requireRow(db, table, rowId, "Deep ingest confirmed item");
+    if (guard && !guard(current)) {
+      throw makeError("Deep ingest confirmed item changed since it was read", "CONFLICT");
+    }
     db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(rowId);
     const activity = logConfirmedCandidateActivity(db, {
       lane: normalizedLane,

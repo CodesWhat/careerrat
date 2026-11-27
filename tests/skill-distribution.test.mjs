@@ -46,12 +46,6 @@ function canonicalSkillNames() {
     .sort();
 }
 
-const BACKEND_ONLY_SKILLS = new Set(["intake-extract", "resume-extract"]);
-
-function userRoutableSkillNames() {
-  return canonicalSkillNames().filter((name) => !BACKEND_ONLY_SKILLS.has(name));
-}
-
 function readSkill(name) {
   const text = readFileSync(join(skillsRoot, name, "SKILL.md"), "utf8");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -151,8 +145,8 @@ test("the published skills catalog lists every shipped skill exactly once", () =
   assert.deepEqual(listed, expected);
 });
 
-test("architecture docs distinguish user-routable skills from backend-only helpers", () => {
-  const expected = userRoutableSkillNames().length;
+test("architecture docs state the user-facing skill count", () => {
+  const expected = canonicalSkillNames().length;
   for (const path of [
     join(root, "docs", "ARCHITECTURE.md"),
     join(root, "apps", "docs", "content", "docs", "advanced", "architecture.mdx"),
@@ -162,25 +156,15 @@ test("architecture docs distinguish user-routable skills from backend-only helpe
       source,
       new RegExp(`maps user intent\\s+to (?:all )?${expected} user-facing skills`, "i")
     );
-    for (const name of BACKEND_ONLY_SKILLS) {
-      assert.match(source, new RegExp(`\\b${name}\\b[\\s\\S]{0,180}backend-only`, "i"));
-    }
     assert.doesNotMatch(source, /\b(?:16|21) skills\b/i);
   }
 });
 
-test("the canonical agent router maps every user-facing skill and classifies backend helpers", () => {
+test("the canonical agent router maps every skill", () => {
   const router = readFileSync(join(root, "AGENTS.md"), "utf8");
 
-  for (const name of userRoutableSkillNames()) {
+  for (const name of canonicalSkillNames()) {
     assert.ok(router.includes(`\`${name}\``), `${name} is not mapped in AGENTS.md`);
-  }
-  for (const name of BACKEND_ONLY_SKILLS) {
-    assert.match(
-      router,
-      new RegExp(`\`${name}\`[\\s\\S]{0,180}backend-only`, "i"),
-      `${name} is not classified as a backend-only helper in AGENTS.md`
-    );
   }
 });
 

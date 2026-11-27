@@ -232,9 +232,8 @@ draft that backed it is gone — then append a note recording what happened.
 
 - **DB workspace:** every `careerrat data <verb>` call in STEP 2/2b already
   re-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write
-  Contract, AGENTS.md). If `careerrat tracker-dev` is running, its `fs.watch` on
-  `tracker.json` already picked this up and live-reloaded the open page —
-  nothing further to do. For a recovery checkpoint, still run:
+  Contract, AGENTS.md). An open terminal workspace picks the change up on its
+  own, so nothing further is needed. For a recovery checkpoint, still run:
 
   ```
   careerrat tracker
@@ -258,7 +257,7 @@ Review any follow-ups now due and hand off to `email-comms` if a draft is needed
 
 **Ghost CTA check:** verify that no `communications[]` record for this job still shows `comm.nextActionDue` in the past, a non-null `comm.draft`, or `comm.status` in a stale state after a terminal app outcome. If found, STEP 2b was missed — go back and apply the comm write-back before continuing (DB mode: re-run the `comm upsert` patch).
 
-Log the outcome to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md), picking the type by what happened:
+Log the outcome to the Activity Pulse feed (the terminal workspace's activity log — see **Activity Pulse** in AGENTS.md), picking the type by what happened:
 
 - **DB workspace:** STEP 2's `app set-status` call already auto-logged one
   generic `status_change` event (and STEP 2b's `comm upsert`/`comm

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { closeDb, retainDb } from "../db/connection.mjs";
 import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
+import { currentPerson, peopleBase, resolvePersonSelection } from "../paths/people.mjs";
 import { borrowedAiWarning } from "../people/ai-route.mjs";
+import { listPeople } from "../people/roster.mjs";
 import {
   cancelTerminalSearch,
   startTerminalSearch,
@@ -15,6 +18,10 @@ import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
 import { jobDetail, summaryJobs } from "./snapshot.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
+const PERSON_ENV_KEYS = ["CAREERRAT_HOME", "CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"];
+// Ops that only touch the agent pane. A stale one is dropped without a notice.
+const PANE_OPS = new Set(["resize", "input", "paste", "scroll", "wheel"]);
+
 // agentIssue says why there is no agent when one was asked for or expected:
 // the TUI shows it in its own banner and names it when a request has nowhere to go.
 export async function createTextualSession({
@@ -25,7 +32,12 @@ export async function createTextualSession({
   emit,
   search = { start: startTerminalSearch, cancel: cancelTerminalSearch },
 }) {
-  const ctx = { repoRoot, env };
+  let ctx = { repoRoot, env };
+  // The owner's own values for the person-selecting variables, unset ones
+  // included, so returning to the owner restores exactly what the start had.
+  const ownerOverrides = currentPerson(env)
+    ? null
+    : Object.fromEntries(PERSON_ENV_KEYS.map((key) => [key, env[key]]));
   const sessionId = randomUUID();
   let data = readJobs(ctx);
   let state = createWorkspaceState(data);
@@ -37,7 +49,20 @@ export async function createTextualSession({
   let closePromise;
   let drawing;
   let watcher;
-  const releaseHolder = registerDbHolder(ctx, "tui");
+  // Bumped on every person switch so a stopped pane's late events are dropped.
+  let generation = 0;
+  let switching = false;
+  retainDb(ctx);
+  // The root this session currently retains and its holder. Released once and
+  // cleared, so a close that lands mid-switch can't release the old root twice.
+  let held = { ctx, release: registerDbHolder(ctx, "tui") };
+  function releaseHeld() {
+    const current = held;
+    held = null;
+    if (!current) return;
+    current.release();
+    closeDb(current.ctx);
+  }
   let lastSnapshot = "";
   let framed = null;
 
@@ -129,6 +154,134 @@ export async function createTextualSession({
           : agentIssue || "No agent is running.";
     send({ type: "request", text, inserted, notice: notice ?? null, reason });
   }
+  // The env a fresh `careerrat --for <name>` start would run with, or the owner's
+  // own workspace for null. Throws, touching nothing, for an unknown or removed person.
+  function personContext(name) {
+    if (name === null && ownerOverrides) {
+      const next = { ...env };
+      for (const [key, value] of Object.entries(ownerOverrides)) {
+        if (value === undefined) delete next[key];
+        else next[key] = value;
+      }
+      return next;
+    }
+    if (name === null) {
+      const base = peopleBase({ repoRoot, env });
+      const next = { ...env, CAREERRAT_HOME: base };
+      delete next.CAREERRAT_PERSON;
+      delete next.CAREERRAT_PEOPLE_BASE;
+      return next;
+    }
+    if (typeof name !== "string") throw new TypeError("Person must be a name or null");
+    return { ...env, ...resolvePersonSelection({ repoRoot, env, forName: name }) };
+  }
+  function personEvent() {
+    return { type: "person", person: currentPerson(env), generation };
+  }
+  function startWatcher() {
+    watcher = createDataWatch({
+      ctx,
+      onChange: () => refresh({ force: false }),
+      onError: (error) =>
+        send({
+          type: "error",
+          message: `Saved data could not be watched: ${error.message}`,
+        }),
+    });
+  }
+  // Reads the destination first, then stops the agent pane, searches and watcher
+  // on the old root and reopens all of it on the new one. A destination that
+  // can't be read leaves the old session exactly as it was. Nothing from the old
+  // person is kept: jobs, selection, filters and pending Undo all start over.
+  async function switchPerson(name) {
+    if (name === currentPerson(env)) {
+      send({ type: "switch-end" });
+      send({
+        type: "notice",
+        message: name ? `Already in ${name}'s workspace.` : "Already in your own workspace.",
+      });
+      return;
+    }
+    let nextEnv;
+    let nextCtx;
+    let nextData;
+    let nextState;
+    try {
+      nextEnv = personContext(name);
+      nextCtx = { repoRoot, env: nextEnv };
+      nextData = readJobs(nextCtx);
+      nextState = createWorkspaceState(nextData);
+    } catch (error) {
+      send({ type: "switch-end" });
+      send({ type: "notice", message: `Can't switch: ${error.message}` });
+      return;
+    }
+    const nextHolder = registerDbHolder(nextCtx, "tui");
+    retainDb(nextCtx);
+    switching = true;
+    generation += 1;
+    clearTimeout(drawing);
+    drawing = null;
+    watcher?.close();
+    const oldPane = pane;
+    const oldCtx = ctx;
+    pane = undefined;
+    exited = false;
+    framed = null;
+    let teardownError = null;
+    try {
+      try {
+        await oldPane?.dispose();
+      } finally {
+        await stopTerminalSessionSearches({ ...oldCtx, sessionId });
+      }
+    } catch (error) {
+      teardownError = error;
+    } finally {
+      // Held until cleanup is done, then the cached connection goes with it.
+      releaseHeld();
+      held = { ctx: nextCtx, release: nextHolder };
+      switching = false;
+    }
+    if (closing) {
+      releaseHeld();
+      return;
+    }
+    env = nextEnv;
+    ctx = nextCtx;
+    // The watcher's baseline comes before the final read, so a write during
+    // teardown is either in this read or reported by the watcher. If the fresh
+    // read can't be used, the preflight one stands.
+    startWatcher();
+    try {
+      const freshData = readJobs(ctx);
+      state = createWorkspaceState(freshData);
+      data = freshData;
+    } catch {
+      data = nextData;
+      state = nextState;
+    }
+    lastSnapshot = "";
+    send(personEvent());
+    snapshot();
+    send({
+      type: "notice",
+      message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
+    });
+    if (teardownError)
+      send({
+        type: "error",
+        message: `The previous workspace did not stop cleanly: ${teardownError.message}`,
+      });
+  }
+  // The agent's launch arguments for the workspace now open: the opening message
+  // depends on that person's setup, so it is decided on every start.
+  function agentArgs() {
+    const args = [...(agent.args || [])];
+    const opening = agent.opening?.(env);
+    if (typeof opening === "string" && opening) args.push(opening);
+    return args;
+  }
   function paneEnv() {
     let base = env;
     try {
@@ -147,6 +300,20 @@ export async function createTextualSession({
   }
   async function dispatch(message) {
     if (closing) throw new Error("Textual session is closed");
+    // An action issued before the open workspace changed, or while it is
+    // changing, was meant for a different person's data. It never runs.
+    if (
+      message.op !== "quit" &&
+      ((message.generation !== undefined && message.generation !== generation) ||
+        (switching && message.op !== "switch-person"))
+    ) {
+      if (!PANE_OPS.has(message.op))
+        send({
+          type: "notice",
+          message: "That action was for the previous workspace, so it was not run.",
+        });
+      return;
+    }
     switch (message.op) {
       case "select": {
         // Only the selection changed: the list Python holds is still right, so
@@ -189,6 +356,23 @@ export async function createTextualSession({
       case "refresh":
         refresh();
         break;
+      case "people": {
+        let people;
+        try {
+          people = listPeople({ repoRoot, env });
+        } catch (error) {
+          send({ type: "notice", message: `People could not be listed: ${error.message}` });
+          break;
+        }
+        send({ type: "people", people, current: currentPerson(env) });
+        break;
+      }
+      case "switch-person": {
+        if (message.person !== null && typeof message.person !== "string")
+          throw new TypeError("Person must be a name or null");
+        await switchPerson(message.person);
+        break;
+      }
       case "document": {
         const job = data.jobs.find((item) => item.id === message.id);
         if (!job) throw new Error("Saved job was not found");
@@ -306,18 +490,22 @@ export async function createTextualSession({
         if (agent && !pane && !exited) {
           native = await import("./agent-pane.mjs");
           if (closing) return;
+          const born = generation;
           pane = native.createAgentPane({
             command: agent.command,
-            args: agent.args || [],
+            args: agentArgs(),
             cwd: repoRoot,
             env: paneEnv(),
             cols,
             rows,
-            onChange: scheduleFrame,
-            onBell: () => send({ type: "bell" }),
-            onTitle: (title) => send({ type: "title", title }),
-            onClipboard: (text) => send({ type: "clipboard", text }),
+            onChange: () => {
+              if (born === generation) scheduleFrame();
+            },
+            onBell: () => born === generation && send({ type: "bell" }),
+            onTitle: (title) => born === generation && send({ type: "title", title }),
+            onClipboard: (text) => born === generation && send({ type: "clipboard", text }),
             onExit: ({ exitCode }) => {
+              if (born !== generation) return;
               exited = true;
               send({ type: "agent-exited", exitCode });
               refresh({ force: false });
@@ -356,26 +544,21 @@ export async function createTextualSession({
     closing = true;
     clearTimeout(drawing);
     watcher?.close();
-    releaseHolder();
     closePromise = (async () => {
       try {
         await pane?.dispose();
       } finally {
-        await stopTerminalSessionSearches({ ...ctx, sessionId });
+        try {
+          await stopTerminalSessionSearches({ ...ctx, sessionId });
+        } finally {
+          releaseHeld();
+        }
       }
     })();
     return closePromise;
   }
   snapshot();
-  watcher = createDataWatch({
-    ctx,
-    onChange: () => refresh({ force: false }),
-    onError: (error) =>
-      send({
-        type: "error",
-        message: `Saved data could not be watched: ${error.message}`,
-      }),
-  });
+  startWatcher();
   if (agentIssue) send({ type: "agent-status", message: agentIssue });
   return { dispatch, refresh, close };
 }

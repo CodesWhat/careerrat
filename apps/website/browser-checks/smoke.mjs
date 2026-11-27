@@ -8,7 +8,7 @@
 // page also has its nav and CTAs clicked, ending on the install docs page.
 import assert from "node:assert/strict";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -107,11 +107,20 @@ function pageUrl(file) {
 let server;
 let origin;
 let paths;
+let noindexPaths;
 const launched = new Map();
 
 before(async () => {
   assert.ok(await isFile(join(OUT, "index.html")), `no built site at ${OUT}; build apps/website first`);
-  paths = (await listPages()).map(pageUrl).filter(Boolean).sort();
+  const pages = await listPages();
+  paths = pages.map(pageUrl).filter(Boolean).sort();
+  noindexPaths = new Set();
+  for (const file of pages) {
+    const path = pageUrl(file);
+    if (!path) continue;
+    const html = await readFile(file, "utf8");
+    if (/<meta[^>]+name="robots"[^>]+content="[^"]*noindex/i.test(html)) noindexPaths.add(path);
+  }
   assert.ok(paths.includes("/"), "built site has no home page");
   assert.ok(
     paths.includes(INSTALL_PATH),
@@ -138,7 +147,10 @@ test("crawl discovery files list the public HTML pages", async () => {
   assert.ok(locations.length > 1, "sitemap includes the site and docs");
   assert.ok(locations.every((url) => url.origin === "https://careerrat.com"));
   const actual = locations.map((url) => url.pathname).sort();
-  const expected = paths.filter((path) => !/(?:^|\/)(?:404|_not-found)\/?$/.test(path));
+  // Pages marked noindex stay reachable but are left out of the sitemap.
+  const expected = paths.filter(
+    (path) => !/(?:^|\/)(?:404|_not-found)\/?$/.test(path) && !noindexPaths.has(path)
+  );
   assert.deepEqual(actual, expected, "sitemap lists each public page exactly once");
 });
 

@@ -1,5 +1,8 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
-import { join, sep } from "node:path";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { dbFilePath } from "../db/connection.mjs";
+import { assertNoDbHolders } from "../db/holders.mjs";
 import { personDocumentsRoot } from "../documents/job-folders.mjs";
 import { personExists, personRoot, validatePersonName } from "../paths/people.mjs";
 
@@ -31,9 +34,31 @@ export function purgePerson({ base, name, env = process.env, now = new Date() })
   const documents = explicitDownloads ? null : personDocumentsRoot(name);
   const hasDocuments = Boolean(documents) && existsSync(documents);
 
+  // A process with the database open would keep writing after the purge, and a plain
+  // file copy of a live WAL database can miss committed pages.
+  const ctx = { env: { ...env, CAREERRAT_HOME: root } };
+  assertNoDbHolders(ctx, { action: "purge" });
+
   const backup = join(base, PEOPLE_BACKUP_DIR, `${name}-${stamp(now)}`);
   mkdirSync(backup, { recursive: true, mode: 0o700 });
-  cpSync(root, join(backup, "workspace"), { recursive: true });
+  const liveDb = dbFilePath(ctx);
+  const dbFiles = new Set([liveDb, `${liveDb}-wal`, `${liveDb}-shm`]);
+  cpSync(root, join(backup, "workspace"), {
+    recursive: true,
+    filter: (source) => !dbFiles.has(source),
+  });
+  if (existsSync(liveDb)) {
+    // VACUUM INTO writes a consistent copy that includes anything still in the WAL.
+    const target = join(backup, "workspace", relative(root, liveDb));
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    const db = new DatabaseSync(liveDb);
+    try {
+      db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    } finally {
+      db.close();
+    }
+    chmodSync(target, 0o600);
+  }
   if (hasDocuments) cpSync(documents, join(backup, "documents"), { recursive: true });
   if (!existsSync(join(backup, "workspace"))) {
     throw new Error("Backup failed; nothing was removed.");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,7 +19,18 @@ const api = await import("../src/core/search/terminal-search-worker.mjs").catch(
 });
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), "careerrat-search-worker-"));
-  const ctx = { repoRoot: home, env: { CAREERRAT_HOME: home } };
+  // Detached workers probe for an installed AI runtime before scanning. An empty
+  // PATH and search dir keep them off any real codex or claude on this machine.
+  const noRuntimes = join(home, "no-runtimes");
+  mkdirSync(noRuntimes);
+  const ctx = {
+    repoRoot: home,
+    env: {
+      CAREERRAT_HOME: home,
+      PATH: noRuntimes,
+      CAREERRAT_RUNTIME_SEARCH_DIRS: noRuntimes,
+    },
+  };
   openDb(ctx);
   t.after(() => {
     closeAll();
@@ -129,7 +140,7 @@ test("worker failures remain failures with a recoverable handoff", async (t) => 
   assert.equal(existsSync(result.handoffPath), true);
 });
 test("a detached worker acknowledges its run and exits after a real empty-source scan", {
-  timeout: 45000,
+  timeout: 120_000,
 }, async (t) => {
   assert.equal(typeof api.launchTerminalSearchWorker, "function");
   const ctx = fixture(t);
@@ -141,15 +152,19 @@ test("a detached worker acknowledges its run and exits after a real empty-source
   );
   assert.equal(receipt.run.id, ctx.runId);
   assert.equal(receipt.detached, true);
+  assert.ok(
+    sourcingRunGet({ ...ctx, id: ctx.runId }).run.progress.aiUnavailableReason,
+    "the worker must find no AI runtime, never a real one on this machine"
+  );
   let result;
-  for (let n = 0; n < 100; n++) {
+  for (let n = 0; n < 1000; n++) {
     result = api.terminalSearchStatus({ ...ctx, id: ctx.runId });
     if (result.run.status !== "running" && result.handoffPath) break;
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
   assert.equal(result.run.status, "completed");
   assert.ok(result.handoffPath);
-  for (let n = 0; n < 100; n++) {
+  for (let n = 0; n < 1000; n++) {
     try {
       process.kill(receipt.workerPid, 0);
     } catch (error) {

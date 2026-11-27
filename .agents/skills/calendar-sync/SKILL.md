@@ -9,8 +9,8 @@ Use this skill when the user asks to add a tracked event to their real calendar,
 sync Calendar to Apple/Google/Outlook, create a calendar hold from CareerRat, or
 handoff a calendar event to local automation.
 
-This builds on the no-auth Calendar export path already rendered in the
-dashboard. The dashboard is read-only; this skill is the writer, and every real
+This builds on the no-auth Calendar export path already shown in the
+terminal workspace. The workspace view is read-only; this skill is the writer, and every real
 calendar write remains confirm-first.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
@@ -170,43 +170,3 @@ If provider sync is blocked, preserve the no-auth fallback:
 - record no `calendarWrites[]` success row unless an actual provider write happened
 
 Do not silently mark a write complete.
-
----
-
-## Conversational workspace path
-
-In the Ask workspace, recording a calendar write is native: the app runs the
-typed intent `calendar.record-write` directly in `workspace-agent.mjs`, not
-this skill's CLI/browser steps. A terminal or external-agent run still
-follows STEP 0 → 5 exactly as written.
-
-- **Trigger.** Past-tense self-reports the candidate already made in their
-  own calendar app — "I added the interview to my Google calendar", "I put
-  the Acme interview on my calendar", "added it to outlook" — match and offer
-  a "Record the calendar event you added" chip. Read/query phrasings ("check
-  my calendar", "what's on my calendar", "calendar sources") never match; only
-  a write-report verb does.
-- **Resolve.** The event resolves to exactly one tracked interview — by a
-  direct application reference, or by matching company/role tokens against
-  upcoming (not-yet-happened) scheduled interviews. Zero or multiple matches
-  refuse with a plain ask for the company name rather than guessing, and the
-  refusal never echoes the candidate's raw, unresolved text back at them.
-  Naming no provider ("I added it to my calendar") still offers the chip; the
-  handler then asks which calendar app before recording anything.
-- **Provenance gate.** Two provenances exist: `manual` (the default — the
-  candidate did the write themselves, so there's nothing for CareerRat to be
-  permitted to do) and `automated` (an app-verified write, checked exactly like
-  STEP 0 above — `mayRun` must return `allowed` for that `calendar_sync`
-  platform). The gate is enforced by the recording verb itself, so every
-  entry point (the Ask intent, the data route, and STEP 4's CLI write) meets
-  the same bar; the Ask intent additionally says up front that calendar sync is turned off
-  for that provider and offers a "Turn it on" action. Manual self-reports are
-  never gated.
-- **Record, never write.** The app never drives a browser or local automation
-  tool from Ask. `calendar.record-write` only appends the
-  `calendarWrites[]` audit row (STEP 4's dedupe policy, extended so an
-  automated record supersedes an existing manual one for the same event) and
-  confirms in the thread — it does not open Apple/Google/Outlook or perform
-  the provider write itself. The `.ics` export and prefilled Google/Outlook
-  links (STEP 5) remain the path that needs no capability when the candidate wants
-  CareerRat to hand them something to add themselves.

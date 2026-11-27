@@ -30,12 +30,14 @@ from textual.widgets import (
     Input,
     Label,
     MarkdownViewer,
+    OptionList,
     Select,
     Static,
     TabbedContent,
     TabPane,
     TextArea,
 )
+from textual.widgets.option_list import Option
 
 HOLD_SECONDS = 12
 LOG_LIMIT_BYTES = 512 * 1024
@@ -611,6 +613,13 @@ class NativePane(Widget):
                 ]
             )
 
+    def clear_frame(self):
+        """Forget the last agent's screen, so the next one never shows the old person's."""
+        self.frame = None
+        self.lines = ()
+        self.strips.clear()
+        self.refresh()
+
     def render_line(self, y):
         if not self.frame:
             return super().render_line(y)
@@ -726,9 +735,11 @@ class ContextCapture(ModalScreen):
     #capture-buttons { height: 1; }
     """
 
-    def __init__(self, prefill=""):
+    def __init__(self, prefill="", generation=0):
         super().__init__()
         self.prefill = prefill
+        # The workspace this draft was opened on; it can only be saved there.
+        self.generation = generation
         self.files = []
         self.waiting = False
         self.request_id = None
@@ -757,7 +768,12 @@ class ContextCapture(ModalScreen):
         self.set_waiting(True)
         self.request_id = self.app.next_request_id()
         await self.app.send(
-            {"op": "inspect", "id": self.request_id, "text": self.prefill}
+            {
+                "op": "inspect",
+                "id": self.request_id,
+                "text": self.prefill,
+                "generation": self.generation,
+            }
         )
 
     def set_waiting(self, waiting):
@@ -802,6 +818,9 @@ class ContextCapture(ModalScreen):
     async def action_save(self):
         if self.waiting:
             return
+        if self.app.switching or self.generation != self.app.generation:
+            self.fail("The workspace changed since this was opened. Close this and add it again.")
+            return
         value = self.query_one(TextArea).text
         if self.files:
             message = {"files": [item["path"] for item in self.files]}
@@ -812,7 +831,14 @@ class ContextCapture(ModalScreen):
         self.request_id = self.app.next_request_id()
         self.query_one("#capture-error", Static).update("")
         self.set_waiting(True)
-        await self.app.send({"op": "capture", "id": self.request_id, **message})
+        await self.app.send(
+            {
+                "op": "capture",
+                "id": self.request_id,
+                **message,
+                "generation": self.generation,
+            }
+        )
 
     async def on_button_pressed(self, event):
         event.stop()
@@ -858,6 +884,50 @@ class JobDocument(ModalScreen):
 
     def action_close(self):
         self.dismiss()
+
+    def on_button_pressed(self, event):
+        event.stop()
+        self.dismiss()
+
+
+class PersonPicker(ModalScreen):
+    """Pick whose workspace to open: your own, or one of the people you run it for."""
+
+    BINDINGS = [Binding("escape", "close", "Cancel")]
+    CSS = """
+    PersonPicker { align: center middle; background: $background 70%; }
+    #person-dialog { width: 60; height: auto; max-height: 80%; padding: 1 2; border: round $accent; background: $surface; }
+    #person-list { height: auto; max-height: 20; margin: 1 0; }
+    """
+
+    def __init__(self, people, current):
+        super().__init__()
+        self.people = people
+        self.current = current
+
+    def compose(self) -> ComposeResult:
+        options = [Option("Your own workspace" + (" (open)" if not self.current else ""), id="")]
+        for person in self.people:
+            name = person["name"]
+            label = name + (" (open)" if name == self.current else "")
+            if not person.get("ready"):
+                label += " · setup not finished"
+            options.append(Option(label, id=name))
+        with Vertical(id="person-dialog", classes="dialog"):
+            yield Static("Switch person\nThe agent and watchers restart on their workspace.", markup=False)
+            yield OptionList(*options, id="person-list")
+            with Horizontal():
+                yield Button("Cancel", id="cancel-person", compact=True)
+
+    def on_mount(self):
+        self.query_one("#person-list", OptionList).focus()
+
+    def action_close(self):
+        self.dismiss()
+
+    def on_option_list_option_selected(self, event):
+        event.stop()
+        self.dismiss(event.option.id or "")
 
     def on_button_pressed(self, event):
         event.stop()
@@ -921,6 +991,7 @@ class CareerRatApp(App):
         Binding("a", "request('apply')", "Apply selected"),
         Binding("c", "add_context", "Add context"),
         Binding("f5", "refresh_jobs", "Refresh"),
+        Binding("p", "switch_person", "Switch person"),
         Binding("t", "filter('status')", "Status", show=False),
         Binding("y", "filter('currency')", "Currency", show=False),
         Binding("b", "filter('basis')", "Pay basis", show=False),
@@ -981,6 +1052,11 @@ class CareerRatApp(App):
         self.status_timer = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
+        # Which workspace the bridge has open. Every request carries it, so a
+        # request queued for one person is never run against another.
+        self.generation = 0
+        self.switching = False
+        self.awaiting_snapshot = False
         self.proc = None
         self.reader = None
         self.stderr_reader = None
@@ -1098,10 +1174,7 @@ class CareerRatApp(App):
         yield Footer()
 
     async def on_mount(self):
-        person = (self.env.get("CAREERRAT_PERSON") or "").strip()
-        if person:
-            self.title = f"CareerRat · {person}"
-            self.sub_title = f"Workspace for {person}"
+        self.show_person((self.env.get("CAREERRAT_PERSON") or "").strip() or None)
         loop = asyncio.get_running_loop()
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):
@@ -1211,9 +1284,15 @@ class CareerRatApp(App):
         if len(self.screen_stack) > 1 or not event.text.strip():
             return
         event.stop()
-        self.push_screen(ContextCapture(prefill=event.text))
+        self.open_context(prefill=event.text)
 
     async def send(self, message):
+        # While a switch is open, nothing but the switch itself (and the pane
+        # resize and quit) goes out: the old workspace is closing and the new
+        # one isn't ready.
+        if self.switching and message.get("op") not in ("switch-person", "resize", "quit"):
+            return
+        message = {"generation": self.generation, **message}
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.stdin.write((json.dumps(message) + "\n").encode())
@@ -1342,6 +1421,23 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
+            if self.awaiting_snapshot:
+                self.awaiting_snapshot = False
+                self.switching = False
+        elif kind == "people":
+            self.push_screen(
+                PersonPicker(value["people"], value.get("current")),
+                lambda choice: self.pick_person(value.get("current"), choice),
+            )
+        elif kind == "person":
+            # Still locked: the switch ends when the destination's snapshot lands.
+            self.generation = value.get("generation", self.generation)
+            self.switching = True
+            self.awaiting_snapshot = True
+            self.open_person(value.get("person"))
+        elif kind == "switch-end":
+            self.switching = False
+            self.awaiting_snapshot = False
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
@@ -1432,6 +1528,30 @@ class CareerRatApp(App):
             self.errors.append(value["message"])
             self.write_log(f"error: {value['message']}")
             self.show_message(value["message"], hold=HOLD_SECONDS)
+
+    def show_person(self, person):
+        """The header says whose workspace is open."""
+        self.title = f"CareerRat · {person}" if person else "CareerRat · Workspace"
+        self.sub_title = f"Workspace for {person}" if person else "Your own workspace"
+
+    def open_person(self, person):
+        """The bridge moved to another workspace: drop everything shown from the last one."""
+        if person:
+            self.env["CAREERRAT_PERSON"] = person
+        else:
+            self.env.pop("CAREERRAT_PERSON", None)
+        self.snapshot = None
+        self.detail = None
+        self.selected_id = None
+        self.table_signature = None
+        self.run_status = {}
+        self.job_ids = []
+        self.job_cells = []
+        self.query_one("#request", Input).value = ""
+        self.show_person(person)
+        self.write_terminal(f"\x1b]2;CareerRat{' · ' + person if person else ''}\x07")
+        self.query_one(NativePane).clear_frame()
+        self.call_after_refresh(self.resize_agent)
 
     def ring_bell(self):
         """The agent rang the bell: pass it to the outer terminal, at most once a second."""
@@ -1859,7 +1979,7 @@ class CareerRatApp(App):
         elif name == "search":
             await self.send({"op": "search-start"})
         elif name == "context":
-            self.push_screen(ContextCapture())
+            self.open_context()
         elif name == "open-jd" and self.selected_id:
             await self.send({"op": "document", "id": self.selected_id})
         elif name == "refresh":
@@ -1885,7 +2005,9 @@ class CareerRatApp(App):
     def check_action(self, action, parameters):
         # Single letters belong to the agent and to text boxes; they only act
         # from the jobs side, and never under a dialog.
-        if action in ("request", "add_context", "refresh_jobs", "filter"):
+        if action in ("request", "add_context", "refresh_jobs", "filter", "switch_person"):
+            if self.switching:
+                return False
             if len(self.screen_stack) > 1 or self.query_one(NativePane).has_focus:
                 return False
             if action == "filter" and not self.query_one(f"#{parameters[0]}").display:
@@ -1900,6 +2022,7 @@ class CareerRatApp(App):
             ("Apply selected", "Ask the agent to apply to the selected job", lambda: self.action_request("apply")),
             ("Add context", "Paste a JD, transcript or file path", self.action_add_context),
             ("Refresh", "Read the saved workspace again", self.action_refresh_jobs),
+            ("Switch person", "Open another person's workspace, or your own", self.action_switch_person),
             ("Jobs / agent", "Move focus between the jobs table and the agent", self.action_switch_focus),
         ):
             yield SystemCommand(label, help_text, callback)
@@ -1910,8 +2033,28 @@ class CareerRatApp(App):
         else:
             await self.send({"op": "request", "action": name})
 
+    def open_context(self, prefill=""):
+        # No draft opens while a switch is in flight: it would be bound to a
+        # workspace that is closing.
+        if self.switching:
+            return
+        self.push_screen(ContextCapture(prefill=prefill, generation=self.generation))
+
     def action_add_context(self):
-        self.push_screen(ContextCapture())
+        self.open_context()
+
+    def pick_person(self, current, choice):
+        # None is Escape or Cancel. The owner's own workspace is "".
+        if choice is None:
+            return
+        person = choice or None
+        if person == current:
+            return
+        self.switching = True
+        asyncio.create_task(self.send({"op": "switch-person", "person": person}))
+
+    async def action_switch_person(self):
+        await self.send({"op": "people"})
 
     async def action_refresh_jobs(self):
         await self.send({"op": "refresh"})

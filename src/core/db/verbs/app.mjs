@@ -1,7 +1,7 @@
 // verbs/app.mjs — applications[] domain actions.
 //
 // Every export here is the ONE shared write path (decision 6): the CLI
-// (src/cli/data.mjs) and the HTTP route (src/cli/data-route.mjs) both call
+// (src/cli/data.mjs) and the HTTP route (the retired data route) both call
 // these exact functions, never reimplementing the SQL. Each is built on
 // runVerb() (verbs/shared.mjs), so each is exactly one BEGIN IMMEDIATE ...
 // COMMIT: state change + meta bump + activity event, then (outside the

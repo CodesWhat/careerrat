@@ -2,7 +2,7 @@
 //
 // The db file lives at `<dataRoot>/db/careerrat.db` — resolved through the same
 // path helpers the rest of the engine uses (workspace.mjs's dataPath/
-// privateDataRoot) so CAREERRAT_HOME (the Electron packaged app's override)
+// privateDataRoot) so CAREERRAT_HOME
 // keeps working, and so the db always lands inside the already-gitignored
 // `.careerrat/` root, never a hardcoded path (M6 decision 2).
 //
@@ -23,6 +23,7 @@ const DB_REL_PATH = "db/careerrat.db";
 // different data roots across tests; the cache must key on the thing that
 // actually determines the db file.
 const _connections = new Map();
+const _retains = new Map();
 
 export function dbFilePath({ repoRoot, env } = {}) {
   return dataPath({ repoRoot, env }, DB_REL_PATH);
@@ -79,6 +80,7 @@ export function openDb({ repoRoot, env } = {}) {
 // `openDb()` call re-opens the file (and re-runs any pending migrations)
 // instead of handing back a stale handle from a previous test's temp dir.
 export function closeAll() {
+  _retains.clear();
   for (const db of _connections.values()) {
     try {
       db.close();
@@ -87,6 +89,34 @@ export function closeAll() {
     }
   }
   _connections.clear();
+}
+
+// A long-lived owner of a data root (a TUI session) retains it, so another
+// owner's closeDb can't close the handle out from under it: the real close
+// waits until the last retainer lets go.
+export function retainDb({ repoRoot, env } = {}) {
+  const key = privateDataRoot({ repoRoot, env });
+  _retains.set(key, (_retains.get(key) ?? 0) + 1);
+}
+
+// Release one retain and, once nobody else holds the root, close and forget the
+// cached connection so nothing keeps the file open after its workspace is done.
+export function closeDb({ repoRoot, env } = {}) {
+  const key = privateDataRoot({ repoRoot, env });
+  const held = _retains.get(key) ?? 0;
+  if (held > 1) {
+    _retains.set(key, held - 1);
+    return;
+  }
+  _retains.delete(key);
+  const db = _connections.get(key);
+  if (!db) return;
+  _connections.delete(key);
+  try {
+    db.close();
+  } catch {
+    /* already closed / file removed out from under us */
+  }
 }
 
 export const NO_DATABASE_MESSAGE =

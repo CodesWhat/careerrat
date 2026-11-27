@@ -315,7 +315,7 @@ Route each gate type through its owning command:
 - Per-application follow-up pause → `workspace/tracker.json` (that record's
   `nextAction`/`nextActionDue`)
 
-Then log each inbound thread to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
+Then log each inbound thread to the Activity Pulse feed (the terminal workspace's activity log — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
 
 ```
 careerrat activity append --type message --actor world \
@@ -339,7 +339,7 @@ If `track-outcomes` fails or returns without writing `status`, `nextAction`, and
 
 ## STEP 9 — WRITE WATERMARK
 
-Run this step unconditionally — even if STEP 8 (the track-outcomes hand-off) returned early or failed, the sweep happened, so the watermark must still be written. Write `lastRunAt` to the matching `sources[]` entry and also set `meta.lastSweepAt` to the same timestamp. Do **not** set `meta.lastUpdatedAt` here — that field drives the dashboard's "last updated" pill and must only be touched when this sweep actually mutated tracker data (a status, nextAction, or nextActionDue change). A sweep that found nothing or had no outcome-signal hand-offs must not reset that pill.
+Run this step unconditionally — even if STEP 8 (the track-outcomes hand-off) returned early or failed, the sweep happened, so the watermark must still be written. Write `lastRunAt` to the matching `sources[]` entry and also set `meta.lastSweepAt` to the same timestamp. Do **not** set `meta.lastUpdatedAt` here — that field drives the terminal workspace's "last updated" pill and must only be touched when this sweep actually mutated tracker data (a status, nextAction, or nextActionDue change). A sweep that found nothing or had no outcome-signal hand-offs must not reset that pill.
 
 **DB workspace:**
 

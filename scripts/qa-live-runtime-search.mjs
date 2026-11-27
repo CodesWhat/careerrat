@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/cli/installed-runtime-route.mjs";
+import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/core/ai/installed-runtime-state.mjs";
 import {
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,

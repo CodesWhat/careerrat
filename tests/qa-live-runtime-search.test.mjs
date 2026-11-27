@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { assertExpectedSourceRevision } from "../scripts/lib/live-search-revision-guard.mjs";
-import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/cli/installed-runtime-route.mjs";
 import { resolveAIRoute } from "../src/core/ai/call-ai.mjs";
+import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/core/ai/installed-runtime-state.mjs";
 import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,

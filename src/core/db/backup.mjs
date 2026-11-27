@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -133,10 +134,18 @@ export function restoreBackup(ctx = {}, selector) {
     vacuumInto(openDb(ctx), safetyCopy);
   }
   closeAll();
-  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${live}${suffix}`, { force: true });
   mkdirSync(dirname(live), { recursive: true, mode: 0o700 });
-  copyFileSync(chosen.full, live);
-  chmodSync(live, 0o600);
+  // Copy beside the live file first, so a failed copy leaves the live database alone.
+  const staged = `${live}.restoring`;
+  try {
+    copyFileSync(chosen.full, staged);
+    chmodSync(staged, 0o600);
+  } catch (error) {
+    rmSync(staged, { force: true });
+    throw error;
+  }
+  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${live}${suffix}`, { force: true });
+  renameSync(staged, live);
   // Reopen so migrations bring an older backup up to date.
   openDb(ctx);
   return { restored: chosen.name, safetyCopy: safetyCopy ? basename(safetyCopy) : null };

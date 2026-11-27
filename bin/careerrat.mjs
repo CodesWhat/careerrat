@@ -10,7 +10,7 @@
 //   careerrat companies   Manage tracked employer ATS boards
 //   careerrat evaluate    Run the body-read gate on a saved job
 //   careerrat questions   Fetch a job's real application-form questions (no browser)
-//   careerrat tracker     One-shot tracker snapshot (use `tracker-dev` for the live dev server)
+//   careerrat tracker     One-shot tracker snapshot
 //   careerrat restore     Recover workspace/tracker.json from a rolling snapshot
 //   careerrat export      Render a tailored artifact / packet to PDF or DOCX
 //   careerrat people      List or add people, one workspace each (see --for)
@@ -28,16 +28,8 @@ import { requirePatchedNode } from "../src/core/runtime/node-floor.mjs";
 
 requirePatchedNode();
 
-import { spawn, spawnSync } from "node:child_process";
-import {
-  closeSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -55,14 +47,6 @@ import {
 import { borrowedAiWarning } from "../src/core/people/ai-route.mjs";
 import { authorizationPath, recordAuthorization } from "../src/core/people/authorization.mjs";
 import { migratePersonDocuments } from "../src/core/people/documents-migration.mjs";
-import {
-  classifyLocalAppRuntime,
-  commandMatchesTrackerScript,
-  findAvailableLoopbackPort,
-  parseRecordedPid,
-  readLocalAppHealth,
-  trackerCommandPort,
-} from "../src/core/update/local-app-runtime.mjs";
 import {
   extractOver,
   fetchTarball,
@@ -98,7 +82,6 @@ const CLIS = {
   questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
   tui: "src/cli/tui.mjs",
-  "tracker-dev": "src/cli/tracker-dev.mjs",
   people: "src/cli/people.mjs",
   roundup: "src/cli/roundup.mjs",
   data: "src/cli/data.mjs",
@@ -143,6 +126,9 @@ const WORKSPACE_DIRS = [
 // agent. It anchors every new session to doctor-driven next-step routing.
 const STARTER_PROMPT =
   "Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished CareerRat skill. Once setup is search-ready, inspect or reuse the baseline search while Paul continues, then expand it through setup-searches -> research-boards -> discover-companies -> search-jobs.";
+
+const RETIRED_BROWSER_MESSAGE =
+  "The browser workspace was retired in v0.26. Use `careerrat start` (terminal workspace).";
 
 // Agent CLIs we know how to launch, in preference order. Each is started with
 // the starter prompt as a single positional argument (the seed-a-session form
@@ -189,6 +175,11 @@ notifyUpdateAvailable();
 
 if (command === "init") {
   process.exit(runInit(rest));
+}
+
+if (command === "tracker-dev") {
+  console.error(RETIRED_BROWSER_MESSAGE);
+  process.exit(1);
 }
 
 if (command === "start") {
@@ -317,26 +308,25 @@ function runInit(extra) {
 function parseStartArgs(extra) {
   const out = {
     agent: null,
-    port: null,
     noAgent: false,
     noDashboard: false,
-    noOpen: false,
-    browser: false,
+    retiredBrowserFlag: false,
   };
   for (let i = 0; i < extra.length; i++) {
     const a = extra[i];
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
-    else if (a === "--no-open") out.noOpen = true;
-    else if (a === "--browser") out.browser = true;
+    else if (a === "--no-open" || a === "--browser") out.retiredBrowserFlag = true;
     else if (a === "--new") {
       // Consumed earlier by the --for resolver (createMissing); nothing to do here.
     } else if (a === "--agent") {
       if (!extra[i + 1]?.trim() || extra[i + 1].startsWith("-"))
         throw new Error("--agent needs a name. Try: careerrat start --agent claude");
       out.agent = extra[++i];
-    } else if (a === "--port") out.port = extra[++i] || out.port;
-    else if (a.startsWith("-")) {
+    } else if (a === "--port") {
+      out.retiredBrowserFlag = true;
+      i++;
+    } else if (a.startsWith("-")) {
       throw new Error(`Unknown option for start: ${a}. Run careerrat start --help for the list.`);
     } else if (!out.agent) out.agent = a; // first bare positional = agent name
   }
@@ -345,11 +335,11 @@ function parseStartArgs(extra) {
 
 // `careerrat start [agent]`, the one-command front door. It opens the Textual
 // terminal workspace with a native Claude or Codex agent (same selection rules
-// as `careerrat tui`). The browser workspace is kept only behind --browser (and
-// --no-dashboard) while the browser entry is retired; `update` restarts a running
-// local app through it.
+// as `careerrat tui`). `--no-dashboard` launches a bare agent session instead.
+// The browser workspace is retired: --browser, --port and --no-open (and the
+// tracker-dev command) print the retired message and exit 1.
 // Usage: careerrat start [claude|codex] [--agent <name>] [--no-agent]
-//        careerrat start --browser [claude|codex] [--no-agent] [--no-open] [--port <n>]
+//        careerrat start --no-dashboard [claude|codex] [--no-agent]
 async function runTerminalWorkspace(opts) {
   const person = currentPerson(process.env);
   if (person) console.log(`• CareerRat for ${person}`);
@@ -364,14 +354,12 @@ async function runTerminalWorkspace(opts) {
 
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
-  const legacy = opts.browser || opts.noDashboard;
-  if (!legacy && (opts.port != null || opts.noOpen))
-    throw new Error(
-      "--port and --no-open apply to the browser workspace. Add --browser to use them."
-    );
-  if (!legacy) return runTerminalWorkspace(opts);
-  const wantDashboard = !opts.noDashboard;
-  const wantAgent = !opts.noAgent && (Boolean(opts.agent) || opts.noDashboard);
+  if (opts.retiredBrowserFlag) {
+    console.error(RETIRED_BROWSER_MESSAGE);
+    return 1;
+  }
+  if (!opts.noDashboard) return runTerminalWorkspace(opts);
+  const wantAgent = !opts.noAgent;
   const forcedAgent = opts.agent;
 
   const person = currentPerson(process.env);
@@ -396,7 +384,7 @@ async function runStart(extra) {
     }
   }
 
-  // 3) Seed a tracker so the local app can boot. Never clobber real data.
+  // 3) Seed a tracker so the terminal workspace has something to open. Never clobber real data.
   const trackerJson = userPath(pathCtx, "workspace/tracker.json");
   if (!existsSync(trackerJson)) {
     try {
@@ -415,41 +403,11 @@ async function runStart(extra) {
         );
       }
     } catch {
-      /* non-fatal: the local app simply won't boot until a tracker exists */
+      /* non-fatal: the workspace simply starts without a tracker */
     }
   }
 
-  // 4) Boot the live local app as a durable service.
-  let dash = null;
-  if (wantDashboard && existsSync(trackerJson)) {
-    dash = await startDashboard(opts.port);
-  }
-
-  if (dash && dash.ready === false && wantDashboard && !wantAgent) {
-    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
-    console.error(
-      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog} and try again.`
-    );
-    return 1;
-  }
-
-  if (dash && dash.ready === false) {
-    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
-    console.error(
-      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog}. Continuing with the terminal session.`
-    );
-  } else if (dash) {
-    const appUrl = `${dash.url}/app`;
-    if (!wantAgent) console.log(`• Continue in your browser → ${appUrl}`);
-    if (!opts.noOpen && !(await openAppInBrowser(appUrl))) {
-      console.log(`Open this address in your browser: ${appUrl}`);
-    }
-  } else if (wantDashboard && !wantAgent) {
-    console.error("The browser workspace could not start. Check the local app log and try again.");
-    return 1;
-  }
-
-  // 5) Hand off to the agent.
+  // 4) Hand off to the agent.
   let exitCode = 0;
   if (wantAgent) {
     const agent = forcedAgent ? resolveForcedAgent(forcedAgent) : findAgent();
@@ -478,34 +436,13 @@ async function runStart(extra) {
           "  Codex:        npm install -g @openai/codex               (https://github.com/openai/codex)"
         );
       }
-      printManualAgentHandoff(dash);
+      printManualAgentHandoff();
     }
-  } else if (!wantDashboard) {
+  } else {
     console.log("");
-    printManualAgentHandoff(dash);
+    printManualAgentHandoff();
   }
   return exitCode;
-}
-
-async function openAppInBrowser(url) {
-  const command =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, [url], {
-        stdio: "ignore",
-        detached: true,
-        shell: process.platform === "win32",
-      });
-      child.once("error", () => resolve(false));
-      child.once("spawn", () => {
-        child.unref();
-        resolve(true);
-      });
-    } catch {
-      resolve(false);
-    }
-  });
 }
 
 // The agent has to start where AGENTS.md and .agents/skills/ live, which is the
@@ -518,189 +455,12 @@ function agentStartDir() {
   return root.length > 1 && root.endsWith(sep) ? root.slice(0, -1) : root;
 }
 
-function printManualAgentHandoff(dash) {
+function printManualAgentHandoff() {
   console.log(`Open your agent in ${agentStartDir()} and say:`);
   console.log("");
   console.log(`    ${STARTER_PROMPT}`);
   console.log("");
   console.log("For a terse CLI handoff, run `careerrat next`.");
-  if (dash) {
-    console.log(
-      `The local app is running separately; stop it with the PID in ${displayPath(pathCtx, ".internal/tracker-dev.pid")}.`
-    );
-  }
-}
-
-// Spawn the tracker dev server as a detached local process. The PID/log live in
-// .internal/ so a future agent can tell whether CareerRat already has a server.
-async function startDashboard(port) {
-  const portCandidate = port ?? process.env.CAREERRAT_DEV_PORT ?? 7777;
-  const parsedPort = Number(portCandidate);
-  let resolvedPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7777;
-  let url = `http://localhost:${resolvedPort}`;
-  const installedVersion = readVersion();
-  const trackerScript = join(root, "src/cli/tracker-dev.mjs");
-  const internalDir = resolveUserPaths(pathCtx).internalDir;
-  mkdirSync(internalDir, { recursive: true });
-  const pidPath = join(internalDir, "tracker-dev.pid");
-  const logPath = join(internalDir, "tracker-dev.log");
-  const recordedPid = readRecordedDashboardPid(pidPath);
-  const recordedCommand = recordedTrackerProcessCommand(recordedPid);
-  const recordedProcessIsTracker =
-    commandMatchesTrackerScript(recordedCommand, trackerScript) &&
-    trackerCommandPort(recordedCommand) === resolvedPort;
-  const health = await readLocalAppHealth(url);
-  const runtime = classifyLocalAppRuntime({
-    health,
-    installedVersion,
-    recordedPid,
-    recordedProcessIsTracker,
-    dataRoot: resolveUserPaths(pathCtx).dataRoot,
-  });
-
-  if (runtime.state === "current") {
-    console.log(`• Local app already live → ${url}`);
-    return { url, existing: true };
-  }
-
-  if (runtime.state === "stale-owned") {
-    console.log(
-      `• Replacing stale local app v${runtime.runningVersion || "unknown"} with v${installedVersion}…`
-    );
-    try {
-      process.kill(runtime.pid, "SIGTERM");
-    } catch {
-      console.log("• Stale local app could not be stopped safely; continuing without replacing it");
-      return null;
-    }
-    if (!(await waitForUrlToStop(url, 5000))) {
-      console.log("• Stale local app did not stop cleanly; continuing without replacing it");
-      return null;
-    }
-  } else if (
-    runtime.state === "foreign" ||
-    runtime.state === "stale-unowned" ||
-    runtime.state === "other-workspace"
-  ) {
-    const fallbackPort = await findAvailableLoopbackPort({ startPort: resolvedPort + 1 });
-    if (!fallbackPort) {
-      console.log("• Local app could not find a safe loopback port; continuing without it");
-      return null;
-    }
-    if (runtime.state === "foreign") {
-      console.log(
-        `• Port ${resolvedPort} belongs to another process; leaving it untouched and using ${fallbackPort}`
-      );
-    } else if (runtime.state === "other-workspace") {
-      console.log(
-        `• Port ${resolvedPort} is running CareerRat for a different workspace; leaving it running and using port ${fallbackPort} for this one`
-      );
-    } else {
-      console.log(
-        `• Stale unowned CareerRat v${runtime.runningVersion || "unknown"} is using port ${resolvedPort}; leaving it untouched and using ${fallbackPort}`
-      );
-    }
-    resolvedPort = fallbackPort;
-    url = `http://localhost:${resolvedPort}`;
-  }
-
-  const args = [trackerScript];
-  if (resolvedPort !== 7777 || port != null) args.push("--port", String(resolvedPort));
-
-  let logFd;
-  try {
-    logFd = openSync(logPath, "a");
-    const child = spawn(process.execPath, args, {
-      cwd: root,
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-    });
-    closeSync(logFd);
-    logFd = null;
-    let childExited = false;
-    child.once("exit", () => {
-      childExited = true;
-    });
-    child.unref();
-    writeFileSync(pidPath, `${child.pid}\n`);
-
-    const ready = await waitForUrl(url, installedVersion, 8000, () => childExited);
-    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
-    if (ready) {
-      console.log(`• Local app live → ${url} (pid ${child.pid}, log ${relLog})`);
-    } else {
-      console.log(`• Local app starting → ${url} (pid ${child.pid}, log ${relLog})`);
-    }
-    return { url, pid: child.pid, logPath, ready };
-  } catch {
-    if (logFd != null) {
-      try {
-        closeSync(logFd);
-      } catch {
-        /* ignore */
-      }
-    }
-    console.log("• Local app could not start; continuing without it");
-    return null;
-  }
-}
-
-function readRecordedDashboardPid(pidPath) {
-  try {
-    return parseRecordedPid(readFileSync(pidPath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function recordedTrackerProcessCommand(pid) {
-  if (!pid) return "";
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return "";
-  }
-  const inspected =
-    process.platform === "win32"
-      ? spawnSync(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`,
-          ],
-          { encoding: "utf8" }
-        )
-      : spawnSync("ps", ["-p", String(pid), "-o", "command="], {
-          encoding: "utf8",
-        });
-  return inspected.status === 0 ? inspected.stdout : "";
-}
-
-async function waitForUrl(url, installedVersion, timeoutMs, hasExited = () => false) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const health = await readLocalAppHealth(url);
-    if (health.careerrat && health.version === installedVersion) return true;
-    if (hasExited()) return false;
-    await delay(150);
-  }
-  return false;
-}
-
-async function waitForUrlToStop(url, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const health = await readLocalAppHealth(url);
-    if (!health.responding) return true;
-    await delay(100);
-  }
-  return false;
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function findAgent() {
@@ -815,7 +575,6 @@ function runUpdate(extra) {
     return 0;
   }
 
-  const runningDashboard = activeRecordedDashboard();
   const depsBefore = readRuntimeDeps(root);
 
   console.log(`• Fetching careerrat@${latest}…`);
@@ -891,41 +650,33 @@ function runUpdate(extra) {
   if (doctorStatus !== 0) {
     console.error("Updated, but doctor reported problems: run careerrat doctor");
   }
-  if (runningDashboard && restartDashboardAfterUpdate(runningDashboard) !== 0) {
-    console.error("CareerRat updated, but the running local app could not be refreshed.");
-    return 1;
-  }
+  noticeRetiredBrowserWorkspace();
   return doctorStatus === 0 ? 0 : 1;
 }
 
-function activeRecordedDashboard() {
-  const internalDir = resolveUserPaths(pathCtx).internalDir;
-  const pid = readRecordedDashboardPid(join(internalDir, "tracker-dev.pid"));
-  const trackerScript = join(root, "src/cli/tracker-dev.mjs");
-  const command = recordedTrackerProcessCommand(pid);
-  if (!commandMatchesTrackerScript(command, trackerScript)) return null;
-  const port = trackerCommandPort(command, {
-    defaultPort: Number(process.env.CAREERRAT_DEV_PORT || 7777),
-  });
-  if (port == null) return null;
-  return {
-    pid,
-    port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 7777,
-  };
+// A tracker-dev server started by an older version keeps running after the
+// update. It is retired, so tell the user how to stop it. Never kill it here.
+function noticeRetiredBrowserWorkspace() {
+  const pid = recordedRetiredWorkspacePid();
+  if (!pid) return;
+  console.log(
+    `• The retired browser workspace is still running (pid ${pid}). Stop it with: kill ${pid}`
+  );
 }
 
-function restartDashboardAfterUpdate({ port }) {
-  console.log("• Refreshing the running local app with the updated code…");
-  const result = spawnSync(
-    process.execPath,
-    [join(root, "bin/careerrat.mjs"), "start", "--browser", "--no-agent", "--port", String(port)],
-    { cwd: root, stdio: "inherit", env: process.env }
-  );
-  if (result.error) {
-    console.error(result.error.message);
-    return 1;
+function recordedRetiredWorkspacePid() {
+  try {
+    const pidPath = join(resolveUserPaths(pathCtx).internalDir, "tracker-dev.pid");
+    const pid = Number.parseInt(readFileSync(pidPath, "utf8").trim(), 10);
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    process.kill(pid, 0);
+    // The pid file can outlive the process and the number can be reused, so
+    // only report a process that is still a tracker-dev server.
+    const ps = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+    return ps.status === 0 && ps.stdout.includes("tracker-dev") ? pid : null;
+  } catch {
+    return null;
   }
-  return result.status == null ? 1 : result.status;
 }
 
 // Builds the stranded-data message, or null when there is nothing stranded. Shared by
@@ -986,8 +737,7 @@ Commands:
   companies   Manage tracked employer ATS boards
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
-  tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat tracker-dev')
-  tracker-dev  Serve the live local app without launching an agent
+  tracker     One-shot tracker snapshot / summary / follow-ups
   people      List, add or remove (--purge --yes) people, one workspace each (run any command for them with --for)
   comm        Shorthand for "data comm": upsert, append-message, mark-sent, handoff [--deliver-to-person]
   roundup     With --for: print or email (--send) a person their job-search roundup
@@ -1002,7 +752,7 @@ Commands:
   plugins     List/verify the bundled plugin layer (read-only; --help for options)
   learnings   Read/append per-role-family learnings
   stories     Read/validate/add STAR+R interview stories
-  activity    Read/append/prune the local app Activity Pulse feed
+  activity    Read/append/prune the Activity Pulse feed
   evidence    Read/validate/add evidence claims
   analytics   Refresh + inspect the persisted outcome-analytics block (--write)
   recruiter-check  Flag outreach that may not be a real recruiter (domain mismatch, no posting, run-code asks)
@@ -1024,8 +774,7 @@ start [ai]:
   Needs Python 3.11+ (first launch builds a private environment) and a real terminal.
   --agent <name>      claude or codex; same as the positional, alternate spelling
   --no-agent          workspace only, don't launch an agent
-  --browser           legacy: serve the browser workspace instead (--no-open, --port <n>)
-  --no-dashboard      legacy: terminal agent session without any workspace
+  --no-dashboard      bare terminal agent session without the workspace
 
 --for <name>:
   Works on every command. Runs it in that person's workspace

@@ -1,5 +1,6 @@
 // tests/providers/builtin.test.mjs — contract test for the builtin.com
-// board-wide aggregator provider.
+// board-wide aggregator provider. Auto-discovered by test-all.mjs under tests/**.
+// Run alone with: node test-all.mjs --only providers/builtin
 //
 // Every fixture here is synthetic. Nothing in this file touches the network.
 
@@ -198,9 +199,9 @@ try {
   }
 
   // ── fetch: dedup across pages, stop on empty page ───────────────────
-  const p1 = "https://builtin.com/jobs?search=a&page=1";
-  const p2 = "https://builtin.com/jobs?search=a&page=2";
-  const p3 = "https://builtin.com/jobs?search=a&page=3";
+  const p1 = `https://builtin.com/jobs?search=a&page=1`;
+  const p2 = `https://builtin.com/jobs?search=a&page=2`;
+  const p3 = `https://builtin.com/jobs?search=a&page=3`;
   const dedupCtx = mockCtx({
     [p1]: pageHtml([
       item("X", "https://builtin.com/job/x", "x"),
@@ -237,9 +238,9 @@ try {
   }
 
   // ── fetch: a throwing page ends that base without crashing ──────────
-  const goodP1 = "https://builtin.com/jobs?search=good&page=1";
-  const goodP2 = "https://builtin.com/jobs?search=good&page=2";
-  const badP1 = "https://builtin.com/jobs?search=bad&page=1";
+  const goodP1 = `https://builtin.com/jobs?search=good&page=1`;
+  const goodP2 = `https://builtin.com/jobs?search=good&page=2`;
+  const badP1 = `https://builtin.com/jobs?search=bad&page=1`;
   const throwCtx = mockCtx({
     [goodP1]: pageHtml([item("Good Role", "https://builtin.com/job/g", "g")]),
     [goodP2]: "", // stop good base
@@ -253,6 +254,31 @@ try {
     pass("builtin.fetch() keeps a good base and swallows a throwing base without crashing");
   } else {
     fail(`throw handling: ${JSON.stringify(survived.map((j) => j.title))}`);
+  }
+
+  // ── fetch: a probe sees the rejection instead of an empty board ─────
+  // verify-portals identifies a live-but-capped board by the budget cutoff's
+  // identity, and a broken one by the error itself (#7175's rule, and
+  // src/core/providers/career-ops/vendor/vdab.mjs's probing branch). Swallowing it into [] turns either
+  // into "this board has no postings".
+  const probeErrCtx = mockCtx({ [p1]: new Error("probe budget spent") });
+  let probeThrew = null;
+  try {
+    await bi.fetch(
+      { name: "B", queries: ["a"], max_pages: 5 },
+      { ...probeErrCtx.ctx, maxPages: 1 }
+    );
+  } catch (err) {
+    probeThrew = err;
+  }
+  if (probeThrew?.message === "probe budget spent") {
+    pass(
+      "builtin.fetch() propagates a page rejection while probing, so the probe can name the board"
+    );
+  } else {
+    fail(
+      `probe rejection: ${probeThrew ? JSON.stringify(probeThrew.message) : "swallowed into a result"}`
+    );
   }
 
   // ── resolveHost / market hosts ──────────────────────────────────────
@@ -465,7 +491,7 @@ try {
     fail("parsePostedAt() should return undefined for unparseable badges");
   }
   if (composeLocation("Hybrid", []) === "" && composeLocation("In-Office", []) === "") {
-    pass("composeLocation() returns '' for a placeless non-remote card (never invents a location)");
+    pass("composeLocation() returns ’’ for a placeless non-remote card (never invents a location)");
   } else {
     fail(`composeLocation(placeless): ${JSON.stringify(composeLocation("Hybrid", []))}`);
   }

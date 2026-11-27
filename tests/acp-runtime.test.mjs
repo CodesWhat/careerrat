@@ -357,7 +357,7 @@ test("runAcpRuntime attaches the app-owned scoped MCP server to the session", as
     name: "careerrat_scoped_tools",
     command: "/safe/runtime",
     args: ["/safe/installed-runtimes.mjs", "--careerrat-scoped-tools"],
-    env: [{ name: "ELECTRON_RUN_AS_NODE", value: "1" }],
+    env: [],
   };
 
   await runAcpRuntime({

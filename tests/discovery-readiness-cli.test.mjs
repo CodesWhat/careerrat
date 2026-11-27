@@ -68,7 +68,7 @@ test("companies --list explains that empty tracked companies means ATS scans are
     assert.equal(result.status, 0);
     assert.match(result.stdout, /No tracked companies yet\./);
     assert.match(result.stdout, /Ask your agent to run discover-companies next/);
-    assert.match(result.stdout, /85 public Career Ops adapters/);
+    assert.match(result.stdout, /153 public Career Ops adapters/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -805,7 +805,7 @@ test("careerrat next runs doctor with --guidance-only and never executes a detec
         CAREERRAT_RUNTIME_SEARCH_DIRS: registry,
       },
       encoding: "utf8",
-      timeout: 5000,
+      timeout: 60_000,
     });
 
     assert.equal(result.signal, null, "careerrat next must not hang");

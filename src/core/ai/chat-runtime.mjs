@@ -412,7 +412,7 @@ function withSourceReviewArtifact(event, skill, { repoRoot, env }) {
 
 // These are the only generic chats with a visible product surface and a typed
 // save path. search-jobs stays on its dedicated AI-web route; app workflows and
-// model-result skills stay on workspace-agent/core pipelines instead of being
+// model-result skills stay on core pipelines instead of being
 // advertised as raw chat capabilities.
 const DIRECT_CHAT_SKILLS = Object.freeze([
   "ingest-profile",

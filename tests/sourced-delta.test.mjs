@@ -209,6 +209,20 @@ test("offerIdentityKeys keeps both an aggregator's own reqId and its URL-derived
   assert.ok(keys.includes("workday:acme.wd5.myworkdayjobs.com:jr12345"));
 });
 
+test("offerIdentityKeys keeps JR2024-12 and JR2024-13 as different Workday requisitions", () => {
+  const key = (tail) =>
+    offerIdentityKeys({
+      company: "Acme",
+      title: "Senior Engineer",
+      url: `https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_${tail}`,
+    }).filter((k) => k.startsWith("workday:"));
+
+  assert.deepEqual(key("JR2024-12"), ["workday:acme.wd5.myworkdayjobs.com:jr2024-12"]);
+  assert.deepEqual(key("JR2024-13"), ["workday:acme.wd5.myworkdayjobs.com:jr2024-13"]);
+  // A one-digit repost disambiguator still folds into its base posting.
+  assert.deepEqual(key("JR2024-2"), key("JR2024"));
+});
+
 test("recognizes a posting carried from a direct Workday snapshot into its HiringCafe-bridged representation", () => {
   // CR-29 round 3: offerIdentity reduced the bridged posting to its
   // aggregator reqId alone, shadowing the URL-derived Workday key the

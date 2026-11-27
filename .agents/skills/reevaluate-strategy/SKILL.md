@@ -31,7 +31,7 @@ Use this skill when the user asks why they're getting filtered, to review their 
 
 **Read the persisted gate; do not recompute the trip.** The threshold comparison is already applied by `buildReevaluationAnalytics()` and stored in `tracker.json#analytics.reevaluation` — thresholds resolved from candidate targeting config `reevaluation.rejection_total` / `reevaluation.rejection_per_family` (defaults: 7 total, 3 per family if absent). This mirrors `track-outcomes` STEP 6 and the AGENTS.md Tracker Write Contract — read the block, trust `reevaluation.due`.
 
-Pre-flight: `analytics.mjs` reads `workspace/tracker.json` (the source of truth) and resolves it relative to the repo root, so it runs from any cwd — no dashboard render is required first. If the file is missing, seed it: `cp templates/tracker.json workspace/tracker.json`.
+Pre-flight: `analytics.mjs` reads `workspace/tracker.json` (the source of truth) and resolves it relative to the repo root, so it runs from any cwd — nothing needs to be opened or rendered first. If the file is missing, seed it: `cp templates/tracker.json workspace/tracker.json`.
 
 Run: `careerrat analytics refresh --json` (dry-run read; use `-- --write` if you also want to persist the refresh to `tracker.json#analytics`).
 
@@ -71,7 +71,7 @@ Run: `npm run analyze:outcomes`
 This produces the full JSON breakdown. Extract the following slices (flag any slice with N < 3 as unreliable / "small-N"):
 
 - **By role-family** (`byRoleFamily`) — counts keyed by the candidate's own family slugs. `classifyRoleFamily` in `outcome-analysis.mjs` derives these from candidate targeting config `role_families` (explicit `[{name, patterns[]}]`) → `role_buckets` (bucket `name` slugified, `titles` as patterns) → neutral title slug (no config). Do NOT hardcode any domain-specific family names here.
-- **By fit-band** — `buildOutcomeSummary` does NOT emit a `byFitBand` field. Partition rejected applications by the **persisted `app.fitBucket`** field (written by `evaluate-job` at evaluation time, so it reflects the `fit_bands` thresholds that were in effect when each role was scored — the same bucket the dashboard shows). Do NOT re-derive bands by re-applying *current* `fit_bands` to `fitScore`: thresholds may have moved since these rows were evaluated, and silently re-bucketing the board is the exact consequential re-score STEP 7 gates as confirm-first. Fall back to `fitScore` + current `fit_bands` (`high_min` default 85, `med_min` default 65 — high ≥ high_min, med ≥ med_min, stretch < med_min) only for the rare row missing `fitBucket`.
+- **By fit-band** — `buildOutcomeSummary` does NOT emit a `byFitBand` field. Partition rejected applications by the **persisted `app.fitBucket`** field (written by `evaluate-job` at evaluation time, so it reflects the `fit_bands` thresholds that were in effect when each role was scored — the same bucket the terminal workspace shows). Do NOT re-derive bands by re-applying *current* `fit_bands` to `fitScore`: thresholds may have moved since these rows were evaluated, and silently re-bucketing the board is the exact consequential re-score STEP 7 gates as confirm-first. Fall back to `fitScore` + current `fit_bands` (`high_min` default 85, `med_min` default 65 — high ≥ high_min, med ≥ med_min, stretch < med_min) only for the rare row missing `fitBucket`.
 - **By channel** (`byChannel`) — keyed by each application's `channel` value (e.g. `referral`, `recruiter`, `board`, `portal`). Cross-filter to rejected-only for reject-rate; cross-filter to `offer`/`interview` for advance-rate.
 - **By mode** (`byMode`) — keyed by each application's `mode` value (e.g. `remote`, `hybrid`, `onsite`).
 - **By sourced pipeline** (`sourcedFamilies`) — family-slug counts for sourced (not-yet-submitted) prospects; use this to check whether the candidate is feeding the right families into the top of the funnel.
@@ -261,7 +261,7 @@ Pass `--family` if providing an explicit slug rather than a role title. Pass `--
 If writing/positioning change accepted, edit `candidate/writing-style.md` with the specific addition/modification. If new writing samples were added, run `npm run calibrate:style`.
 
 **(f) tracker.json — stamp the review marker (ALWAYS, even on a no-change review)**
-A completed review must clear the dashboard "review ready" nudge whether or not any
+A completed review must clear the terminal workspace "review ready" nudge whether or not any
 adjustment was accepted — running the analysis *is* the review. Stamp the marker:
 
 ```

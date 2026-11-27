@@ -69,11 +69,8 @@ and uncertainty stop it and hand the form to you. It presses Submit itself only 
 
 On Windows, CareerRat looks for the `py -3` launcher, then `python`. The terminal
 workspace has not been tested end to end on Windows yet, so tell us if it fails
-on your machine. Separately, the Windows x64 installer passes build, install, launch, export, and uninstall QA,
-but it is not a public release asset yet. SignPath Foundation signing requires project reputation CareerRat does not yet
-have. Unsigned CI packages are QA-only and never public release assets. See the
-repository's [Windows status](https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md)
-and [code signing policy](https://github.com/CodesWhat/careerrat/blob/main/docs/CODE_SIGNING_POLICY.md).
+on your machine. There is no Windows installer, so install from npm. See
+[Windows: install from npm](https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md).
 
 ## The Mac app has ended
 
@@ -101,8 +98,7 @@ careerrat start
 |------|--------|
 | `--agent <name>` | Use `claude` or `codex` (same as `careerrat start claude`) |
 | `--no-agent` | Open the workspace without starting a chat |
-| `--browser` | Legacy: serve the browser workspace instead (also `--no-open`, `--port <n>`) |
-| `--no-dashboard` | Legacy: terminal agent session without the workspace |
+| `--no-dashboard` | Bare terminal agent session without the workspace |
 
 ## Manual wiring
 

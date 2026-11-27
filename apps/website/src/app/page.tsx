@@ -1,8 +1,44 @@
 import { ArrowRight, ClipboardList, Lock, Radar, Target } from "lucide-react";
 import { Footer } from "@/components/Footer";
+import { JsonLd } from "@/components/JsonLd";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
 const INSTALL_URL = "/docs/getting-started/install";
+const ORIGIN = "https://careerrat.com";
+const GITHUB_URL = "https://github.com/CodesWhat/careerrat";
+
+// Facts only: name, description and license come from package.json and the
+// site copy. No ratings or review counts.
+const POSITIONING = "CareerRat turns the AI CLI you already have into a personal recruiter.";
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://codeswhat.com/#organization",
+      name: "CodesWhat",
+      url: "https://codeswhat.com",
+      logo: `${ORIGIN}/codeswhat-logo.png`,
+      sameAs: ["https://github.com/CodesWhat"],
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${ORIGIN}/#software`,
+      name: "CareerRat",
+      description: `${POSITIONING} It rates jobs, applies with your real experience, and tracks outcomes in your terminal. Free and MIT licensed.`,
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "macOS, Linux, Windows",
+      url: `${ORIGIN}/`,
+      downloadUrl: "https://www.npmjs.com/package/careerrat",
+      license: "https://opensource.org/license/mit",
+      codeRepository: GITHUB_URL,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      publisher: { "@id": "https://codeswhat.com/#organization" },
+    },
+  ],
+};
+
 const STAR_HISTORY_URL =
   "https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left";
 const STAR_HISTORY_CHART =
@@ -52,6 +88,7 @@ const features = [
 export default function Home() {
   return (
     <div className="site-shell">
+      <JsonLd data={structuredData} />
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
@@ -61,6 +98,9 @@ export default function Home() {
             CareerRat
           </a>
           <div className="site-nav__links">
+            <a className="site-nav__optional" href="#story">
+              The story
+            </a>
             <a className="site-nav__optional" href="#how-it-works">
               How it works
             </a>
@@ -88,16 +128,15 @@ export default function Home() {
         <section className="hero" id="top" aria-labelledby="hero-title">
           <div className="hero__intro">
             <div className="hero__heading">
-              <p className="eyebrow">CareerRat / Terminal workspace</p>
+              <p className="eyebrow">CareerRat / Open source job search</p>
               <h1 id="hero-title">
                 Your job hunt.
                 <br />
                 <span>In your terminal.</span>
               </h1>
               <p className="hero__copy">
-                CareerRat turns the AI CLI you already have into a personal recruiter. It rates the
-                jobs worth chasing, applies with your real experience, and tracks what happens. Your
-                saved jobs on one side. Your agent on the other.
+                {POSITIONING} It rates the jobs worth chasing, applies with your real experience,
+                and tracks what happens. Your saved jobs on one side. Your agent on the other.
               </p>
               <div className="button-row">
                 <TrackedCtaLink
@@ -107,8 +146,13 @@ export default function Home() {
                 >
                   Install with npm <ArrowRight aria-hidden="true" size={17} strokeWidth={2.2} />
                 </TrackedCtaLink>
-                <a className="button button--secondary button--large" href="#how-it-works">
-                  See how it works
+                <a
+                  className="button button--secondary button--large"
+                  href={GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Read the code on GitHub
                 </a>
               </div>
             </div>
@@ -153,8 +197,48 @@ export default function Home() {
           </figure>
         </section>
 
+        <section className="section" id="story" aria-labelledby="story-title">
+          <p className="eyebrow">01 / The story</p>
+          <h2 id="story-title">Built for a real job search.</h2>
+          <p className="section__intro">
+            CareerRat is how Scott found a job. Now he runs it for other people too, each person in
+            their own separate workspace. The code is public, so you can read exactly how it works.
+            Paul, the CareerRat rat, is the one asking the questions.
+          </p>
+          <div className="steps-grid">
+            <article className="step-card">
+              <span className="step-card__number">01</span>
+              <h3>Why</h3>
+              <p>
+                Companies screen you with software, and a job hunt is a lot of postings that
+                don&apos;t fit. CareerRat reads each one against what you want, so your time goes to
+                the jobs you could actually get.
+              </p>
+            </article>
+            <article className="step-card">
+              <span className="step-card__number">02</span>
+              <h3>What it does</h3>
+              <p>
+                It rates jobs before you apply, writes your résumé and cover letter from your real
+                experience, and keeps score of every application. It never invents anything that
+                isn&apos;t yours, and saved résumés and cover letters are fact-checked.
+              </p>
+            </article>
+            <article className="step-card">
+              <span className="step-card__number">03</span>
+              <h3>What it learned</h3>
+              <p>
+                Tell it about a rejection, an interview, or an offer and it records the result. If
+                there&apos;s a lesson worth keeping, it saves that too, and it reviews your search
+                strategy once enough results pile up. It gives you honest outcome rates and warns
+                you about fake recruiters.
+              </p>
+            </article>
+          </div>
+        </section>
+
         <section className="section" id="how-it-works" aria-labelledby="how-title">
-          <p className="eyebrow">01 / How it works</p>
+          <p className="eyebrow">02 / How it works</p>
           <h2 id="how-title">Rate. Apply. Track.</h2>
           <div className="steps-grid">
             <article className="step-card">
@@ -256,7 +340,7 @@ export default function Home() {
         </section>
 
         <section className="section" aria-labelledby="features-title">
-          <p className="eyebrow">02 / Your side of the table</p>
+          <p className="eyebrow">03 / Your side of the table</p>
           <h2 id="features-title">An agent for your side of the table.</h2>
           <p className="section__intro">
             Companies screen you with software. CareerRat aligns your experience to the role, gets
@@ -280,7 +364,7 @@ export default function Home() {
         <section className="section" id="get" aria-labelledby="get-title">
           <div className="download-card">
             <div>
-              <p className="eyebrow">03 / Get CareerRat</p>
+              <p className="eyebrow">04 / Get CareerRat</p>
               <h2 id="get-title">One install, and you&apos;re talking.</h2>
               <p className="download-card__copy">
                 Run npm i -g careerrat, then careerrat start. The workspace opens in your terminal
@@ -320,10 +404,21 @@ export default function Home() {
               </p>
             </div>
           </div>
+          <div className="guardrails-card">
+            <p className="eyebrow">Cost and privacy</p>
+            <ul className="guardrails-list">
+              <li>CareerRat is free and MIT licensed.</li>
+              <li>Your jobs and records are stored in a local SQLite database on your machine.</li>
+              <li>
+                Only the context a task needs goes to the AI provider you picked, under its terms.
+                That provider may bill you for usage.
+              </li>
+            </ul>
+          </div>
         </section>
 
         <section className="section" id="star-history" aria-labelledby="star-history-title">
-          <p className="eyebrow">04 / Open source</p>
+          <p className="eyebrow">05 / Open source</p>
           <h2 id="star-history-title">Star history</h2>
           <a
             className="star-history"
@@ -346,8 +441,8 @@ export default function Home() {
         <section className="section" aria-labelledby="final-title">
           <div className="final-cta">
             <BrandMark compact />
-            <h2 id="final-title">Ready when you are.</h2>
-            <p>Install it and start talking.</p>
+            <h2 id="final-title">Read it, or run it.</h2>
+            <p>Read the code on GitHub, or install it and start talking.</p>
             <div className="button-row">
               <TrackedCtaLink
                 className="button button--primary button--large"
@@ -356,8 +451,13 @@ export default function Home() {
               >
                 Get CareerRat
               </TrackedCtaLink>
-              <a className="button button--outline button--large" href="#how-it-works">
-                How it works
+              <a
+                className="button button--outline button--large"
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Read the code on GitHub
               </a>
             </div>
           </div>

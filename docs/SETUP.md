@@ -62,8 +62,8 @@ posting and say "evaluate this", or try the bundled sample under
 It needs a real terminal and exits with an error otherwise. It never opens a browser.
 
 Flags: `--no-agent` (workspace only, no chat), `--agent <name>` (alias for the
-positional), `--browser` (legacy: serve the browser workspace, with `--no-open` and
-`--port <n>`), `--no-dashboard` (legacy: terminal agent session without the workspace).
+positional), `--no-dashboard` (terminal agent session without the workspace).
+`--browser` is retired and prints a message (see below).
 
 ## Exported Files
 
@@ -84,10 +84,8 @@ careerrat update     # fetches the latest published code; your data is untouched
 ```
 
 The update command pulls the latest release from npm and overwrites only the
-code. Your `.careerrat/workspace/` and `.careerrat/candidate/` data are not touched. If the local app
-is running, the updated launcher verifies its version and safely replaces only
-that recorded CareerRat process. An unrelated process on the preferred port is
-left alone and CareerRat uses another loopback port.
+code. Your `.careerrat/workspace/` and `.careerrat/candidate/` data are not touched. If a CareerRat
+process is running, close it first so the next launch picks up the new code.
 
 ## Manual Wiring
 
@@ -150,23 +148,17 @@ actions ask for their own concrete capability only when that action is needed.
 Both require `apply-job` to run or verify `evaluate-job` before tailoring,
 filling, or submitting.
 
-## Legacy browser workspace
+## Browser workspace (retired)
 
-The terminal workspace is the product surface. The browser workspace is a legacy
-surface that is being retired. `careerrat start --browser` brings it up. To run it separately:
+The terminal workspace is the product surface. The browser workspace was retired
+in v0.26. `careerrat tracker-dev` and `careerrat start --browser` print a retired
+message and exit 1. Use `careerrat start`.
 
-```bash
-careerrat tracker        # snapshot tracker.json for recovery
-careerrat tracker-dev    # live-updating app server on :7777
-```
+`careerrat tracker` still creates a deduplicated recovery snapshot of
+`tracker.json` and prints a summary.
 
-`careerrat start --browser` runs that workspace as a separate local process and
-writes `.careerrat/internal/tracker-dev.pid` plus `.careerrat/internal/tracker-dev.log`, so the page
-stays available while the launched agent works.
-
-`careerrat tracker` creates a deduplicated recovery snapshot and prints a summary.
-The live server reads the canonical database view directly, watches exported tracker
-state, and refreshes the open page over Server-Sent Events.
+If an older version left a browser server running, `careerrat update` prints its
+pid and the `kill` command to stop it. It never stops the process itself.
 
 ## Workspace Directories
 

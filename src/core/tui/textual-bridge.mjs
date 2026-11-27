@@ -89,9 +89,12 @@ async function main(args) {
   for (const name of names) {
     const command = findInstalledExecutable([name]);
     if (command) {
-      agent = { command, args: name === "codex" ? ["--no-daemon"] : claudeLaunchArgs(repoRoot) };
-      const opening = firstRunPrompt({ repoRoot });
-      if (opening) agent.args.push(opening);
+      agent = {
+        command,
+        args: name === "codex" ? ["--no-daemon"] : claudeLaunchArgs(repoRoot),
+        // Decided per start, for whichever person's workspace is open.
+        opening: (env) => firstRunPrompt({ repoRoot, env }),
+      };
       break;
     }
   }

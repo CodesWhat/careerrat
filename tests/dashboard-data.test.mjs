@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { buildChatFirstView } from "../apps/web/src/chat-first/chat-first-model.js";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
-import { buildLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
 
 const root = new URL("..", import.meta.url);
 
@@ -789,61 +787,6 @@ test("Dashboard adapter builds Network relationship map from live tracker state"
       (entry) => entry.applicationId === "aperture" && entry.summary
     )
   );
-});
-
-test("Dashboard library snapshot summarizes evidence, stories, voice, and claim gaps", () => {
-  const snapshot = buildLibrarySnapshot({
-    evidence: {
-      claims: [
-        {
-          id: "resume-003",
-          claim:
-            "Demo Docs Assistant — production AI assistant with Slack, web, ticketing, hybrid RAG, and tools.",
-          metrics: ["~50% routine IT requests auto-resolved"],
-          role_signals: ["agents", "applied ai", "rag"],
-          allowed_wording: ["Built Demo Docs Assistant, the firm AI assistant."],
-          forbidden_wording: ["Do not claim model training ownership."],
-        },
-        {
-          id: "resume-005",
-          claim: "APIZone — enterprise integration platform syncing SaaS systems.",
-          metrics: [],
-          role_signals: ["identity", "automation"],
-          allowed_wording: ["Built APIZone for SaaS sync."],
-        },
-      ],
-    },
-    stories: {
-      stories: [
-        {
-          id: "story-pearl",
-          title: "Built Demo Docs Assistant 0→1",
-          competencies: ["0-to-1 ownership"],
-          role_signals: ["agents", "applied ai"],
-          metrics: ["~50% routine IT requests auto-resolved"],
-        },
-      ],
-    },
-    honesty: {
-      claims: {
-        do_not_fabricate: ["Do not invent customer impact numbers."],
-      },
-    },
-    writingStyleText: "Lead impact with the number, then the mechanism. Plain, confident, human.",
-  });
-
-  assert.equal(snapshot.metrics.claims, 2);
-  assert.equal(snapshot.metrics.stories, 1);
-  // Only claim-specific forbidden_wording is a genuine open gap. Settled honesty
-  // policy (do_not_fabricate / do_not_claim) is NOT surfaced as "Needs confirmation"
-  // here — it lives in Settings → Honesty Boundaries (ui-change-queue C2).
-  assert.equal(snapshot.metrics.gaps, 1);
-  assert.equal(snapshot.cards[0].kind, "story");
-  assert.equal(snapshot.cards[0].title, "Built Demo Docs Assistant 0→1");
-  assert.ok(snapshot.filters.some((filter) => filter.label === "Agents" && filter.count === 2));
-  assert.ok(snapshot.cards.some((card) => card.kind === "story"));
-  assert.ok(snapshot.cards.some((card) => card.kind === "voice"));
-  assert.doesNotMatch(JSON.stringify(snapshot), /current_base|currentBase|123K/);
 });
 
 test("Dashboard adapter exposes data-backed Evidence Library status", () => {
@@ -2477,72 +2420,6 @@ test("Dashboard nextsteps use action labels and reference the related job's deta
   assert.equal(step.actionLabel, "Interview");
   assert.equal(step.actionToneClass, "text-on-tertiary-container");
   assert.equal(step.supportingText, "Aperture · tomorrow");
-});
-
-test("evaluate verdict requirements project end to end from tracker data through the chat-first view", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "app-two-rows",
-        company: "Hightouch",
-        role: "Software Engineer",
-        status: "reviewed-hold",
-        evaluation: {
-          gate: "review",
-          fitScore: 82,
-          requirements: [
-            {
-              requirement: "5+ years backend engineering",
-              importance: "critical",
-              evidence: "stated",
-              jdSignal: "5+ years of backend experience required",
-              match: "strong",
-              note: "",
-            },
-            {
-              requirement: "Experience with distributed systems",
-              importance: "meaningful",
-              evidence: "inferred",
-              jdSignal: "",
-              match: "partial",
-              note: "Only exposure through one prior role",
-            },
-          ],
-        },
-      },
-      {
-        id: "app-no-requirements-key",
-        company: "Initech",
-        role: "Software Engineer",
-        status: "reviewed-hold",
-        evaluation: { gate: "review", fitScore: 64 },
-      },
-      {
-        id: "app-empty-requirements",
-        company: "Globex",
-        role: "Software Engineer",
-        status: "reviewed-hold",
-        evaluation: { gate: "review", fitScore: 70, requirements: [] },
-      },
-    ],
-    sourced: [],
-  };
-
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-15T13:30:00.000Z"),
-  });
-  const view = buildChatFirstView(vm, {});
-
-  assert.deepEqual(
-    view.jobDetails["app-two-rows"].requirements,
-    tracker.applications[0].evaluation.requirements
-  );
-  // Older evaluations without a requirements array project to null so the
-  // drawer/panel section hides instead of rendering an empty table.
-  assert.equal(view.jobDetails["app-no-requirements-key"].requirements, null);
-  // An explicit empty array carries no rows either; either representation
-  // (null or an empty array) must leave the UI with nothing to render.
-  assert.equal(view.jobDetails["app-empty-requirements"].requirements?.length || 0, 0);
 });
 
 test("job rows carry lastTouchAt from the same signal that drives the decay state", () => {

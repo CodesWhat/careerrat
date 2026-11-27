@@ -775,15 +775,7 @@ export function applyCandidateResumeSeedInDb(
   };
 }
 
-export function candidateConfigPatch({
-  repoRoot,
-  env,
-  name,
-  patch,
-  unset,
-  recordActivity = true,
-  onWrite,
-} = {}) {
+function assertConfigPatchArgs({ name, patch, unset, onWrite, guard }) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
     err.code = "NOT_FOUND";
@@ -796,69 +788,111 @@ export function candidateConfigPatch({
   }
   if (onWrite !== undefined && typeof onWrite !== "function")
     throw new TypeError("onWrite must be a synchronous function");
-  const unsetList = normalizeUnsetList(unset);
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
+  return normalizeUnsetList(unset);
+}
 
+function configPatchInDb(db, { name, patch, unsetList, recordActivity = true, onWrite, guard }) {
+  // Checked inside the write transaction so a change that landed after the
+  // caller's own read can't be silently overwritten.
+  if (guard && !guard(readCandidateConfigFromDb(db)[name])) {
+    const err = new Error(`candidate config "${name}" changed since it was read`);
+    err.code = "CONFLICT";
+    throw err;
+  }
+  const before = onWrite
+    ? name === "targeting"
+      ? readTargeting(db)
+      : readSingleton(db, SINGLETON_TABLES[name], DEFAULTS[name] || {})
+    : undefined;
+  if (name === "targeting") {
+    const current = unsetPaths(readTargeting(db), unsetList);
+    const merged = deepMerge(current, patch);
+    merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
+    merged.tracked_companies = compactStrings(merged.tracked_companies);
+    merged.excluded_companies = compactStrings(merged.excluded_companies);
+    assertValid("targeting", merged);
+    const { role_buckets, tracked_companies, excluded_companies, ...base } = merged;
+    putSingleton(db, "candidate_targeting", base);
+    putSearchTracks(db, role_buckets);
+    putCompanies(db, "target", tracked_companies);
+    putCompanies(db, "excluded", excluded_companies);
+    return completeCandidateConfigWrite(
+      db,
+      name,
+      { data: readTargeting(db), setup: refreshCandidateSetup(db) },
+      { recordActivity, onWrite, before }
+    );
+  }
+
+  if (name === "application-limits") {
+    const current = unsetPaths(
+      readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"]),
+      unsetList
+    );
+    const merged = normalizeApplicationLimits(deepMerge(current, patch));
+    assertValid(name, merged);
+    putSingleton(db, "candidate_application_limits", merged);
+    return completeCandidateConfigWrite(
+      db,
+      name,
+      { data: merged, setup: refreshCandidateSetup(db) },
+      { recordActivity, onWrite, before }
+    );
+  }
+
+  const table = SINGLETON_TABLES[name];
+  const current = unsetPaths(readSingleton(db, table, DEFAULTS[name] || {}), unsetList);
+  const merged =
+    name === "profile"
+      ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))
+      : name === "automation"
+        ? deepMerge(normalizeAutomationConfig(current), patch)
+        : deepMerge(current, patch);
+  assertValid(name, merged);
+  putSingleton(db, table, merged);
+  return completeCandidateConfigWrite(
+    db,
+    name,
+    { data: merged, setup: refreshCandidateSetup(db) },
+    { recordActivity, onWrite, before }
+  );
+}
+
+export function candidateConfigPatch({
+  repoRoot,
+  env,
+  name,
+  patch,
+  unset,
+  recordActivity = true,
+  onWrite,
+  guard,
+} = {}) {
+  const unsetList = assertConfigPatchArgs({ name, patch, unset, onWrite, guard });
   return runVerb(
     { repoRoot, env },
-    (db) => {
-      const before = onWrite
-        ? name === "targeting"
-          ? readTargeting(db)
-          : readSingleton(db, SINGLETON_TABLES[name], DEFAULTS[name] || {})
-        : undefined;
-      if (name === "targeting") {
-        const current = unsetPaths(readTargeting(db), unsetList);
-        const merged = deepMerge(current, patch);
-        merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
-        merged.tracked_companies = compactStrings(merged.tracked_companies);
-        merged.excluded_companies = compactStrings(merged.excluded_companies);
-        assertValid("targeting", merged);
-        const { role_buckets, tracked_companies, excluded_companies, ...base } = merged;
-        putSingleton(db, "candidate_targeting", base);
-        putSearchTracks(db, role_buckets);
-        putCompanies(db, "target", tracked_companies);
-        putCompanies(db, "excluded", excluded_companies);
-        return completeCandidateConfigWrite(
-          db,
-          name,
-          { data: readTargeting(db), setup: refreshCandidateSetup(db) },
-          { recordActivity, onWrite, before }
-        );
-      }
+    (db) => configPatchInDb(db, { name, patch, unsetList, recordActivity, onWrite, guard }),
+    { requireExistingTracker: true }
+  );
+}
 
-      if (name === "application-limits") {
-        const current = unsetPaths(
-          readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"]),
-          unsetList
-        );
-        const merged = normalizeApplicationLimits(deepMerge(current, patch));
-        assertValid(name, merged);
-        putSingleton(db, "candidate_application_limits", merged);
-        return completeCandidateConfigWrite(
-          db,
-          name,
-          { data: merged, setup: refreshCandidateSetup(db) },
-          { recordActivity, onWrite, before }
-        );
-      }
-
-      const table = SINGLETON_TABLES[name];
-      const current = unsetPaths(readSingleton(db, table, DEFAULTS[name] || {}), unsetList);
-      const merged =
-        name === "profile"
-          ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))
-          : name === "automation"
-            ? deepMerge(normalizeAutomationConfig(current), patch)
-            : deepMerge(current, patch);
-      assertValid(name, merged);
-      putSingleton(db, table, merged);
-      return completeCandidateConfigWrite(
-        db,
-        name,
-        { data: merged, setup: refreshCandidateSetup(db) },
-        { recordActivity, onWrite, before }
-      );
-    },
+// Several config documents in ONE write transaction: every guard runs against
+// the live rows and a CONFLICT on any of them rolls back all the writes.
+export function candidateConfigPatchMany({ repoRoot, env, writes } = {}) {
+  if (!Array.isArray(writes) || !writes.length) {
+    const err = new Error("writes must be a non-empty array");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  const prepared = writes.map((write) => ({
+    ...write,
+    unsetList: assertConfigPatchArgs(write),
+  }));
+  return runVerb(
+    { repoRoot, env },
+    (db) => ({ results: prepared.map((write) => configPatchInDb(db, write)) }),
     { requireExistingTracker: true }
   );
 }
@@ -1046,6 +1080,7 @@ export function candidateEvidenceMerge({
   claims,
   recordActivity = true,
   onWrite,
+  guard,
 } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
@@ -1055,9 +1090,19 @@ export function candidateEvidenceMerge({
   assertCleanEvidenceClaims(claims);
   if (onWrite !== undefined && typeof onWrite !== "function")
     throw new TypeError("onWrite must be a synchronous function");
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
   return runVerb(
     { repoRoot, env },
-    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity, onWrite }),
+    (db) => {
+      // Checked inside the write transaction, against the claims as stored now.
+      if (guard && !guard(readEvidence(db).claims)) {
+        const err = new Error("evidence changed since it was read");
+        err.code = "CONFLICT";
+        throw err;
+      }
+      return mergeEvidenceClaimsInDb(db, { claims, recordActivity, onWrite });
+    },
     { requireExistingTracker: true }
   );
 }
@@ -1171,19 +1216,26 @@ function nextClaimId(usedIds) {
 // new verb: unlike candidateEvidenceMerge (upsert-by-id), this is a pure
 // remove — a clean NOT_FOUND on an unknown id rather than a silent no-op,
 // so the Library drawer's Delete affordance can surface a real error.
-export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
+export function candidateEvidenceRemoveOne({ repoRoot, env, id, guard } = {}) {
   const claimId = String(id || "").trim();
   if (!claimId) {
     const err = new Error("candidateEvidenceRemoveOne requires id");
     err.code = "BAD_REQUEST";
     throw err;
   }
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
   return runVerb(
     { repoRoot, env },
     (db) => {
       const existing = db
         .prepare("SELECT data FROM candidate_evidence_claims WHERE id = ?")
         .get(claimId);
+      if (guard && !guard(existing ? JSON.parse(existing.data) : undefined)) {
+        const err = new Error("evidence changed since it was read");
+        err.code = "CONFLICT";
+        throw err;
+      }
       if (!existing) {
         const err = new Error(`evidence claim not found: "${claimId}"`);
         err.code = "NOT_FOUND";

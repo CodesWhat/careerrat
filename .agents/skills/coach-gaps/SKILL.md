@@ -14,7 +14,7 @@ metadata:
 
 Use this skill when the user asks how to close a fit gap, improve their fit for a role, or
 says something like "why did this land at review" and wants to do something about it. It is
-the DB/web workspace's coaching loop, not a scanner: it only ever fires on a role
+the DB workspace's coaching loop, not a scanner: it only ever fires on a role
 `evaluate-job` already body-read and scored, never on a raw sourced listing.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Honesty
@@ -43,18 +43,15 @@ Fires **only** when both are true on the application's current typed `evaluation
 
 Never on `gate: "keep"` (nothing to coach — the role already cleared) and never on
 `gate: "cut"` (nothing to coach toward — comp-floor failures and hard cuts are not a coaching
-problem). It runs on its own the moment such a verdict lands, once per evaluation, in the
-job's thread. From the terminal, `careerrat evaluate <job> --write` is what saves that verdict
-(`evaluate-job` STEP 9); without it there is nothing to coach. The "Coach me on this fit" button next to Re-evaluate in the Jobs drawer's
-Evaluate card, or the same request typed in Ask, runs it again on demand. If no AI is set up
+problem). It runs on its own the moment such a verdict lands, once per evaluation. From the terminal, `careerrat evaluate <job> --write` is what saves that verdict
+(`evaluate-job` STEP 9); without it there is nothing to coach. Asking for coaching again runs it on demand. If no AI is set up
 the automatic run is skipped with a short note instead of an error.
 
 ---
 
 ## STEP 1 — Build the plan
 
-The `coaching.plan` workspace intent (`src/core/agent/workspace-agent.mjs`) calls
-`buildCoachingPlan` (`src/core/coaching/plan.mjs`), which is modeled directly on
+Run `buildCoachingPlan` (`src/core/coaching/plan.mjs`), which is modeled directly on
 `evaluatePacketGate` (`src/core/packet/gate.mjs`): the same `runBoundedAI` bounded-AI call,
 the same schema-validated JSON contract (`coachingPlanSchema`,
 `src/core/coaching/schemas.mjs`), and the same `NO_AI_ROUTE` degradation to a reviewable
@@ -121,22 +118,19 @@ is saved into evidence (STEP 3), `"dismissed"` if the candidate skips it. This m
 
 ## STEP 3 — Save the drafts into evidence (the firewall)
 
-Drafts grounded in evidence already on record are saved automatically, right after the plan is
-built: `coaching.plan` runs the same save for every open gap that has an evidence-claim draft,
-and each saved claim shows up in the job thread with an Undo. A draft the firewall refuses is not
-saved: its gap stays open and the message says why. Undoing a saved claim removes it from the
-evidence bank and reopens its gap; if other work cites the claim now, the undo is refused and the
-gap stays closed. The legacy `coaching.evidence-save` intent (buttons persisted in older threads)
-runs the same save for one gap, and answers "Already saved." for a gap the plan already closed.
-Either way only the plan's own stored `gap.suggestion.draftClaim` is persisted. There is no
-caller-supplied override, so the text in the plan is the exact text that gets written. Before
-touching anything, the executor checks two invariants:
+Once the plan is built, save the drafts grounded in evidence already on record, for every
+open gap that has an evidence-claim draft, and record each save so it can be undone. A draft the
+firewall refuses is not saved: its gap stays open and the plan says why. Undoing a saved claim
+removes it from the evidence bank and reopens its gap; if other work cites the claim now, the
+undo is refused and the gap stays closed. Only the plan's own stored `gap.suggestion.draftClaim`
+is persisted. There is no caller-supplied override, so the text in the plan is the exact text
+that gets written. Before
+touching anything, the save checks two invariants:
 
 - **Staleness.** `coachingPlan.basedOn` is compared against the application's current
   `evaluation` (`evaluatedAt` is the discriminator; `gate`/`fitScore` are a sanity check on
   top). A plan built against a since-superseded evaluation throws `COACHING_PLAN_STALE`
-  instead of acting — re-run STEP 0 first. The Coaching card mirrors this read-only: once
-  stale it stays visible but disables Add/Skip with a plain notice to coach again.
+  instead of acting — re-run STEP 0 first.
 - **Gap status.** Only an `"open"` gap can be saved; a dismissed gap throws
   `COACHING_GAP_NOT_OPEN` rather than silently re-writing it.
 
@@ -157,18 +151,18 @@ write uses — never a bypass:
    via `appSetFields`.
 
 A validation failure is never silently swallowed or treated as a save: in the auto-save it
-leaves the gap open and is reported in the plan message, and from the legacy click it surfaces
+leaves the gap open and is reported in the plan message, and from a manual save it surfaces
 as a real error.
 
-Skipping a gap sets its `status` to `"dismissed"` via a plain `appSetFields` field patch (no
-intent needed for a skip — it changes nothing about evidence or scoring).
+Skipping a gap sets its `status` to `"dismissed"` via a plain `appSetFields` field patch (it
+changes nothing about evidence or scoring).
 
 ---
 
 ## STEP 4 — Offer a re-evaluation
 
-Once at least one gap is closed, offer **"See if this changed your fit"** — the existing
-`job.evaluate` intent, re-run exactly as `evaluate-job` already does it. This skill never
+Once at least one gap is closed, offer **"See if this changed your fit"** — a re-run of
+`evaluate-job`, exactly as it already runs. This skill never
 re-scores anything itself and never promises the score will move; it only offers the same
 gate a second time now that new evidence is on record.
 

@@ -54,25 +54,3 @@ export function employerApplyLink(application) {
   }
   return null;
 }
-
-// Find the employer link for a LinkedIn posting. Saved fields first, then the
-// posting's public page through the intake resolver (no login, no clicks).
-// Returns { employerUrl } or { employerUrl: null }.
-export async function resolveEmployerApplyLink({
-  application,
-  linkedinUrl,
-  resolveJobUrlImpl,
-  signal,
-} = {}) {
-  const saved = employerApplyLink(application);
-  if (saved) return { employerUrl: saved };
-  if (typeof resolveJobUrlImpl !== "function" || !linkedinUrl) return { employerUrl: null };
-  try {
-    const resolved = await resolveJobUrlImpl(linkedinUrl, { signal, employerLinkLookup: true });
-    const candidate =
-      unwrapLinkedInExternalApply(resolved?.url) || publicEmployerUrl(resolved?.url);
-    return { employerUrl: candidate };
-  } catch {
-    return { employerUrl: null };
-  }
-}

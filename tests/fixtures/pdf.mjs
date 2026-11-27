@@ -1,6 +1,5 @@
 // tests/fixtures/pdf.mjs — buildMinimalPdf(), hoisted out of
-// tests/resume-extract.test.mjs (which introduced it) once a second caller
-// (tests/intake-extract.test.mjs) needed the same fixture. A spec-minimal,
+// a test file once a second caller needed the same fixture. A spec-minimal,
 // byte-offset-accurate single-page PDF (Catalog/Pages/Page/Font objects + one
 // content stream + a byte-accurate xref table), generated programmatically
 // rather than checking in a binary fixture. Pure and deterministic — no I/O.

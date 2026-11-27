@@ -69,11 +69,11 @@ const archivo = localFont({
 
 export const metadata: Metadata = {
   title: {
-    template: "%s — CareerRat Docs",
+    template: "%s | CareerRat Docs",
     default: "CareerRat Docs",
   },
   description:
-    "Documentation for CareerRat — an agentic job-search workspace for finding, vetting, tailoring, tracking, and preparing for roles.",
+    "Documentation for CareerRat. It turns the AI CLI you already have into a personal recruiter that rates jobs, applies with your real experience, and tracks outcomes.",
   // Docs are served at careerrat.com/docs/... (basePath: "/docs" — see
   // next.config.ts). metadataBase is the site origin; Next resolves each
   // page's already-basePath-prefixed relative URLs against it, so this

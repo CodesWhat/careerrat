@@ -105,6 +105,148 @@ closeAll();
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertEqual(result.stdout.strip(), b"60")
 
+    async def test_switch_person_picker_swaps_the_workspace_and_header(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-people-") as folder:
+            base = Path(folder)
+            for home, job in (
+                (base, "OwnerCo"),
+                (base / "people/ada", "AdaCo"),
+            ):
+                (home / "workspace").mkdir(parents=True)
+                (home / "workspace/tracker.json").write_text(
+                    json.dumps(
+                        {
+                            "applications": [
+                                {
+                                    "id": job.lower(),
+                                    "company": job,
+                                    "role": "Lead",
+                                    "status": "applied",
+                                }
+                            ]
+                        }
+                    )
+                )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                self.assertEqual(app.sub_title, "Your own workspace")
+                await pilot.press("p")
+                await until(lambda: isinstance(app.screen, MODULE.PersonPicker))
+                picker = app.screen.query_one("#person-list")
+                self.assertEqual(
+                    [option.id for option in picker.options], ["", "ada"]
+                )
+                picker.highlighted = 1
+                await pilot.press("enter")
+                await until(lambda: app.job_ids == ["adaco"])
+                self.assertEqual(app.title, "CareerRat · ada")
+                self.assertEqual(app.sub_title, "Workspace for ada")
+                self.assertEqual(app.env["CAREERRAT_PERSON"], "ada")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_cancelling_the_person_picker_sends_no_switch(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        sent = []
+
+        async def record(message):
+            sent.append(message)
+
+        app.send = record
+        # Escape and Cancel dismiss with None; that is not "your own workspace".
+        app.pick_person("ada", None)
+        await asyncio.sleep(0.05)
+        self.assertEqual(sent, [])
+        self.assertFalse(app.switching)
+        # The owner entry is a real choice and does switch.
+        app.pick_person("ada", "")
+        await asyncio.sleep(0.05)
+        self.assertEqual(sent, [{"op": "switch-person", "person": None}])
+        self.assertTrue(app.switching)
+
+    async def test_actions_are_blocked_during_a_switch_and_tagged_with_the_generation(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        written = []
+
+        class Stdin:
+            def write(self, data):
+                written.append(json.loads(data))
+
+            async def drain(self):
+                pass
+
+        app.proc = SimpleNamespace(returncode=None, stdin=Stdin())
+        await app.send({"op": "refresh"})
+        self.assertEqual(written, [{"op": "refresh", "generation": 0}])
+        app.switching = True
+        await app.send({"op": "search-start"})
+        await app.send({"op": "request", "action": "review"})
+        self.assertEqual(len(written), 1, "workspace actions wait for the switch")
+        await app.send({"op": "switch-person", "person": "ada"})
+        self.assertEqual(written[-1]["op"], "switch-person")
+        self.assertFalse(app.check_action("request", ()))
+        # A refused switch ends the wait without changing the workspace.
+        app.switching = False
+        app.generation = 3
+        await app.send({"op": "refresh"})
+        self.assertEqual(written[-1], {"op": "refresh", "generation": 3})
+
+    async def test_context_drafts_are_blocked_in_a_switch_and_bound_to_their_workspace(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        pushed = []
+        app.push_screen = lambda screen, *a, **k: pushed.append(screen)
+        app.switching = True
+        app.action_add_context()
+        app.open_context(prefill="pasted JD")
+        self.assertEqual(pushed, [], "no draft opens while a switch is in flight")
+        app.switching = False
+        app.generation = 2
+        app.action_add_context()
+        self.assertEqual(pushed[0].generation, 2)
+
+        written = []
+
+        class Stdin:
+            def write(self, data):
+                written.append(json.loads(data))
+
+            async def drain(self):
+                pass
+
+        app.proc = SimpleNamespace(returncode=None, stdin=Stdin())
+        # A draft keeps the generation that opened it, even if the app moved on.
+        await app.send({"op": "capture", "id": 1, "text": "x", "generation": 2})
+        app.generation = 3
+        await app.send({"op": "capture", "id": 2, "text": "y", "generation": 2})
+        self.assertEqual([m["generation"] for m in written], [2, 2])
+
+        # Saving a draft from the old workspace is refused before anything is sent.
+        failures = []
+        written.clear()
+        await MODULE.ContextCapture.action_save(
+            SimpleNamespace(waiting=False, app=app, generation=2, fail=failures.append)
+        )
+        self.assertEqual(written, [])
+        self.assertEqual(len(failures), 1)
+
+    async def test_the_switch_lock_holds_until_the_destination_snapshot_lands(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        calls = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: calls.append(("person", person))
+        app.update_workspace = lambda value: calls.append(("workspace", value))
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        self.assertTrue(app.switching, "still locked after the person event")
+        self.assertFalse(app.check_action("add_context", ()))
+        await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        self.assertFalse(app.switching)
+        self.assertEqual([c[0] for c in calls], ["person", "workspace"])
+
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
     )

@@ -1197,12 +1197,11 @@ function assertBashSyntaxStepsUseBashShell(job, jobId) {
   }
 }
 
-test("real Chromium application preparation and rendered UI geometry are an explicit required CI context", async () => {
-  const [workflow, protection, liveApply, liveVisual] = await Promise.all([
+test("real Chromium application preparation is an explicit required CI context", async () => {
+  const [workflow, protection, liveApply] = await Promise.all([
     source(".github/workflows/ci-verify.yml"),
     source("scripts/protect-main.sh"),
     source("tests/playwright-live.test.mjs"),
-    source("tests/playwright-app-visual.test.mjs"),
   ]);
   const job = workflow.slice(
     workflow.indexOf("  browser-application-prep:"),
@@ -1216,18 +1215,28 @@ test("real Chromium application preparation and rendered UI geometry are an expl
     /container:\s*\n\s+image: mcr\.microsoft\.com\/playwright:v[\d.]+-noble@sha256:[0-9a-f]{64}/
   );
   assert.doesNotMatch(job, /playwright install/);
-  assert.match(job, /npm run build --workspace apps\/web/);
+  assert.doesNotMatch(job, /--workspace apps\/web/);
+  assert.doesNotMatch(job, /playwright-app-visual/);
   assert.match(job, /tests\/playwright-live\.test\.mjs/);
   assert.match(job, /tests\/playwright-live-dropdowns\.test\.mjs/);
-  assert.match(job, /tests\/playwright-app-visual\.test\.mjs/);
-  assert.match(job, /output\/playwright/);
   assert.doesNotMatch(job, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
   assert.match(protection, /"context": "browser-application-prep"/);
   assert.match(liveApply, /assert\.notEqual\(result\.state, "applied"\)/);
   assert.match(liveApply, /clicked\.includes\("Submit application"\), false/);
-  assert.match(liveVisual, /getComputedStyle/);
-  assert.match(liveVisual, /boundingBox/);
-  assert.match(liveVisual, /page\.screenshot/);
+});
+
+test("web-build runs the packed npm install smoke, not the apps/web build", async () => {
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const job = workflow.slice(
+    workflow.indexOf("  web-build:"),
+    workflow.indexOf("  website-build:")
+  );
+  assert.match(job, /name:\s*web-build/);
+  assert.match(job, /npm run smoke:packed-install/);
+  assert.match(job, /npm pack --dry-run --json --ignore-scripts > "\$RUNNER_TEMP\/pack\.json"/);
+  assert.match(job, /startsWith\("apps\/web"\)/);
+  assert.doesNotMatch(job, /--workspace apps\/web\b/);
+  assert.doesNotMatch(job, /apps\/desktop/);
 });
 
 test("all deterministic product builds are declared as protected contexts", async () => {
@@ -1317,7 +1326,7 @@ test("main-only jobs skip on dev pull requests unless their paths changed, and f
   }
 });
 
-test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {
+test("windows-package-smoke runs the win32 filter, then the packed npm smoke, and nothing references apps/desktop", async () => {
   const workflow = await source(".github/workflows/ci-verify.yml");
   const job = workflow.slice(
     workflow.indexOf("  windows-package-smoke:"),
@@ -1326,13 +1335,13 @@ test("windows-package-smoke filters to win32-gated cases before building the ins
   const testStepIndex = job.search(
     /node --test --test-name-pattern "\\\[win32\\\]" tests\/installed-runtime\.test\.mjs tests\/doctor-installed-runtimes\.test\.mjs/
   );
-  const distWindowsIndex = job.indexOf("npm run dist:windows --workspace apps/desktop");
+  const smokeIndex = job.indexOf("npm run smoke:packed-install");
   assert.notEqual(testStepIndex, -1, "the win32 test-name-pattern filter must be present");
-  assert.notEqual(distWindowsIndex, -1, "the dist:windows step must be present");
-  assert.ok(
-    testStepIndex < distWindowsIndex,
-    "the filtered installed-runtime identity tests must run before dist:windows"
-  );
+  assert.notEqual(smokeIndex, -1, "the packed npm smoke step must be present");
+  assert.ok(testStepIndex < smokeIndex, "the win32 filter must run before the packed smoke");
+  assert.doesNotMatch(job, /apps\/desktop|dist:windows|verify:windows|Electron/);
+  const smokeStep = job.slice(job.lastIndexOf("      - name:", smokeIndex), smokeIndex);
+  assert.match(smokeStep, /shell:\s*bash/);
 });
 
 test("every dependency-installing job activates the pinned npm, resolves a trusted node path, stages installs with scripts and bin-links disabled, checks allowScripts through that trusted node directly, then reinstalls strictly, in order", async () => {
@@ -2077,7 +2086,7 @@ test("[codex-305-r11] the @npmcli/config devDependency is pinned to the exact ve
 // Corepack cache. Spawns a fresh node process, with $COREPACK_HOME pointed
 // at a brand-new empty directory, that requires the exact module this file
 // loads its option/shorthand tables from — the same failure mode the
-// macOS desktop-release job hit (bundled `npm ci` then `release:pretag`,
+// retired macOS release job hit (bundled `npm ci` then `release:pretag`,
 // with Corepack never invoked) is reproduced directly here instead of only
 // being asserted about.
 //
@@ -2476,17 +2485,11 @@ test("fixture: a workspace postinstall that resolves and runs a scriptless depen
 });
 
 test("paid native AI certification is separate from deterministic release gates", async () => {
-  const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
+  const [rootPackage, rootVerify] = await Promise.all([
     source("package.json"),
     source("scripts/verify-live-search-receipts.mjs"),
-    source("apps/desktop/scripts/verify-release.mjs"),
-    source(".github/workflows/desktop-release.yml"),
   ]);
   const pkg = JSON.parse(rootPackage);
-  const macReleaseJob = desktopWorkflow.slice(
-    desktopWorkflow.indexOf("  build-notarize-upload:"),
-    desktopWorkflow.indexOf("  build-windows-upload:")
-  );
   assert.equal(
     pkg.scripts?.["release:pretag"],
     "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs"
@@ -2497,14 +2500,33 @@ test("paid native AI certification is separate from deterministic release gates"
   );
   assert.doesNotMatch(rootVerify, /releaseVersion|EXCEPTION/);
   assert.match(rootVerify, /PASS native AI search certification evidence/);
-  assert.doesNotMatch(desktopVerify, /live-search|Live-search|verifyLiveSearchReceiptDirectory/);
-  assert.doesNotMatch(desktopWorkflow, /Verify current native AI search receipts/);
-  assert.match(desktopWorkflow, /Verify deterministic release metadata/);
-  assert.match(desktopWorkflow, /npm run release:pretag/);
-  assert.doesNotMatch(
-    desktopWorkflow,
-    /LIVE_SEARCH_(?:SKIP|BYPASS|EXCEPTION)|skip-live-search|bypass-live-search/i
-  );
-  assert.doesNotMatch(macReleaseJob, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
-  assert.match(macReleaseJob, /fetch-depth:\s*0/);
 });
+
+test("release docs keep paid native-runtime certification off the release blocker", async () => {
+  const release = await source("docs/RELEASE.md");
+
+  for (const pattern of [
+    /separate product-certification[\s\S]{0,120}not a tag or packaged-release prerequisite/i,
+    /Open-web result mix[\s\S]{0,120}external state/i,
+    /native runtime adapters[\s\S]{0,240}scheduled\s+certification cadence/i,
+    /source-checkout command fails[\s\S]{0,80}missing or stale/i,
+    /protected unit, integration, browser, and build\s+matrix/i,
+  ]) {
+    assert.match(release, pattern, `docs/RELEASE.md should match ${pattern}`);
+  }
+});
+
+// CR74: a job stuck in a harden-runner or post-step (cache save, checkout
+// cleanup) sits until GitHub's 6-hour default. Every always-on CI and security
+// job carries its own cap so a hang fails fast and the rerun is cheap.
+for (const file of ["ci-verify.yml", "security-actions.yml"]) {
+  test(`every ${file} job sets a bounded timeout-minutes`, async () => {
+    const workflow = YAML.parse(await source(`.github/workflows/${file}`));
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+      assert.ok(
+        Number.isInteger(job["timeout-minutes"]) && job["timeout-minutes"] <= 30,
+        `${file} job "${jobId}" needs timeout-minutes (<= 30) so a hung post-step fails fast`
+      );
+    }
+  });
+}

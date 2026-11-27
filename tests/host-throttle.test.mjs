@@ -9,8 +9,14 @@ async function fakeServer({ minGapMs = 0, delayMs = 0, handler } = {}) {
   const state = { active: 0, maxActive: 0, starts: [], count: 0 };
   const server = createServer((req, res) => {
     state.count += 1;
-    const at = Date.now();
-    const previous = state.starts.at(-1);
+    // The throttle's spacing is a send-side guarantee. Judge it on when the
+    // client actually sent the request (stamped by the test's fetch wrapper), not
+    // on when this server's event loop got around to the socket, which stretches
+    // and bunches up under CPU load.
+    const at = Number(req.headers["x-sent-at"]) || Date.now();
+    // Any earlier request within the gap, in either direction: stamped sends can
+    // arrive out of order.
+    const tooClose = state.starts.some((other) => Math.abs(at - other) < minGapMs);
     state.starts.push(at);
     state.active += 1;
     state.maxActive = Math.max(state.maxActive, state.active);
@@ -22,7 +28,7 @@ async function fakeServer({ minGapMs = 0, delayMs = 0, handler } = {}) {
       }, delayMs);
     };
     if (handler) return handler(state, req, finish);
-    if (previous != null && at - previous < minGapMs) return finish(429, { "retry-after": "0" });
+    if (tooClose) return finish(429, { "retry-after": "0" });
     return finish(200);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -57,7 +63,9 @@ test("per-host concurrency never exceeds the cap", async () => {
 test("minimum spacing keeps a rate-limiting host from ever answering 429", async () => {
   const server = await fakeServer({ minGapMs: 20 });
   try {
-    const throttle = createHostThrottle(fetch, { maxConcurrent: 4, minSpacingMs: 60 });
+    const stampedFetch = (url, init = {}) =>
+      fetch(url, { ...init, headers: { ...init.headers, "x-sent-at": String(Date.now()) } });
+    const throttle = createHostThrottle(stampedFetch, { maxConcurrent: 4, minSpacingMs: 60 });
     const responses = await Promise.all(
       Array.from({ length: 12 }, () => throttle.fetch(server.url))
     );
@@ -187,15 +195,37 @@ test("a 503 on a POST is not retried", async () => {
 });
 
 test("different hosts do not queue behind each other", async () => {
-  const a = await fakeServer({ delayMs: 50 });
-  const b = await fakeServer({ delayMs: 50 });
+  // Each origin holds its response until both have received a request, so the
+  // two only complete if the throttle sent them concurrently. No wall-clock
+  // budget: a throttle that queued one host behind the other would never open
+  // the gate.
+  let arrived = 0;
+  let openGate;
+  const gate = new Promise((resolve) => {
+    openGate = resolve;
+  });
+  const handler = (_state, _req, finish) => {
+    arrived += 1;
+    if (arrived === 2) openGate();
+    gate.then(() => finish(200));
+  };
+  const a = await fakeServer({ handler });
+  const b = await fakeServer({ handler });
+  let giveUp;
   try {
     const throttle = createHostThrottle(fetch, { maxConcurrent: 1, minSpacingMs: 0 });
-    const started = Date.now();
-    await Promise.all([throttle.fetch(a.url), throttle.fetch(b.url)]);
-    assert.ok(Date.now() - started < 95);
+    const both = Promise.all([throttle.fetch(a.url), throttle.fetch(b.url)]);
+    const outcome = await Promise.race([
+      both.then(() => "done"),
+      new Promise((resolve) => {
+        giveUp = setTimeout(() => resolve("queued"), 30_000);
+      }),
+    ]);
+    clearTimeout(giveUp);
+    assert.equal(outcome, "done", "the second host's request waited behind the first host's");
     assert.equal(Object.keys(throttle.stats().hosts).length, 2);
   } finally {
+    openGate();
     await a.close();
     await b.close();
   }

@@ -12,6 +12,7 @@ import { normalizeAutomationConfig } from "../automation/consent.mjs";
 import {
   candidateConfigGet,
   candidateConfigPatch,
+  candidateConfigPatchMany,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
 } from "../db/verbs/candidate.mjs";
@@ -24,7 +25,6 @@ import { linkedinProposalUnapprove } from "../db/verbs/linkedin-proposals.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite } from "../profile/evidence-writer.mjs";
 import { restoreRerankRows } from "../strategy/review.mjs";
-import { WORKSPACE_THREAD_ID } from "./workspace-thread.mjs";
 
 const PRIVATE_MARKER = "[private]";
 const PRIVATE_NOTE = "This value is private, so it can't be undone from the thread.";
@@ -215,17 +215,6 @@ export function configWriteEntries({ before, after, writes, source, writer }) {
   return entries;
 }
 
-export function undoNextAction({ messageId, index, entry }) {
-  return {
-    label: entry.label ? `Undo ${entry.label}` : "Undo",
-    intent: {
-      type: "knowledge.revert",
-      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { messageId, index },
-    },
-  };
-}
-
 function entryValue(entry, key) {
   return entry[`${key}Absent`] === true ? undefined : entry[key];
 }
@@ -285,8 +274,27 @@ function revertConfig({ repoRoot, env, entry }) {
     else group.patch = mergePatch(group.patch, nestPatch(item.path, prior));
     byName.set(item.name, group);
   }
-  for (const [name, { patch, unset }] of byName) {
-    candidateConfigPatch({ repoRoot, env, name, patch, unset });
+  // Every document's guard and inverse write share one transaction, so a
+  // conflict on any of them rolls all of them back.
+  const writes = [...byName].map(([name, { patch, unset }]) => ({
+    name,
+    patch,
+    unset,
+    // Re-checked inside the write transaction: the read above is not atomic with it.
+    guard: (doc) =>
+      items
+        .filter((item) => item.name === name)
+        .every((item) =>
+          sameValue(readConfigPath(configView(name, doc), item.path), entryValue(item, "after"))
+        ),
+  }));
+  try {
+    candidateConfigPatchMany({ repoRoot, env, writes });
+  } catch (error) {
+    if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
+    throw error;
+  }
+  for (const [name, { unset }] of byName) {
     // A patch that touches location mode fields makes the profile normalizer
     // stamp mode_preferences_confirmed back on, so an absent prior is unset again.
     const now = candidateConfigGet({ repoRoot, env })[name];
@@ -302,12 +310,15 @@ function revertEvidence({ repoRoot, env, entry }) {
   const live = claims.find((claim) => claim.id === entry.id);
   const wasAfter = entryValue(entry, "after");
   if (!sameValue(live, wasAfter)) return refuse(STALE_NOTE, "stale");
+  // Re-checked inside the write transaction: the read above is not atomic with it.
+  const stillAfter = (claim) => sameValue(claim, wasAfter);
   const prior = entryValue(entry, "before");
   if (prior === undefined) {
     try {
-      candidateEvidenceRemoveOne({ repoRoot, env, id: entry.id });
+      candidateEvidenceRemoveOne({ repoRoot, env, id: entry.id, guard: stillAfter });
     } catch (error) {
       if (error?.code === "EVIDENCE_IN_USE") return refuse(EVIDENCE_IN_USE_NOTE, "in-use");
+      if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
       throw error;
     }
     return { ok: true };
@@ -317,7 +328,18 @@ function revertEvidence({ repoRoot, env, entry }) {
   if (!plan.ok) {
     return refuse(`CareerRat could not put this claim back: ${plan.error}`, "rejected");
   }
-  const merged = candidateEvidenceMerge({ repoRoot, env, claims: [plan.claim] });
+  let merged;
+  try {
+    merged = candidateEvidenceMerge({
+      repoRoot,
+      env,
+      claims: [plan.claim],
+      guard: (stored) => stillAfter(stored.find((claim) => claim.id === entry.id)),
+    });
+  } catch (error) {
+    if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
+    throw error;
+  }
   // The merge skips a claim whose text another claim already holds; nothing
   // was restored then, so that is a refusal, not a success.
   if (!merged || merged.added < 1) return refuse(CLAIM_TEXT_TAKEN_NOTE, "text-taken");
@@ -341,20 +363,33 @@ function revertDeepIngest({ repoRoot, env, entry }) {
   const live = rows.find((row) => row.id === entry.id);
   const wasAfter = entryValue(entry, "after");
   const prior = entryValue(entry, "before");
-  if (entry.op === "add") {
-    if (!sameValue(live, wasAfter)) return refuse(STALE_NOTE, "stale");
-    deepIngestConfirmedItemRemove({ repoRoot, env, lane, id: entry.id });
-    return { ok: true };
+  // Each guard re-checks inside the write transaction: the read above is not atomic with it.
+  try {
+    if (entry.op === "add") {
+      if (!sameValue(live, wasAfter)) return refuse(STALE_NOTE, "stale");
+      deepIngestConfirmedItemRemove({
+        repoRoot,
+        env,
+        lane,
+        id: entry.id,
+        guard: (row) => sameValue(row, wasAfter),
+      });
+      return { ok: true };
+    }
+    if (!live || !sameValue(live[entry.path], wasAfter)) return refuse(STALE_NOTE, "stale");
+    if (prior === undefined) return refuse(NO_INVERSE_NOTE, "unsupported");
+    deepIngestConfirmedItemUpdate({
+      repoRoot,
+      env,
+      lane,
+      id: entry.id,
+      fields: { [entry.path]: prior },
+      guard: (row) => sameValue(row[entry.path], wasAfter),
+    });
+  } catch (error) {
+    if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
+    throw error;
   }
-  if (!live || !sameValue(live[entry.path], wasAfter)) return refuse(STALE_NOTE, "stale");
-  if (prior === undefined) return refuse(NO_INVERSE_NOTE, "unsupported");
-  deepIngestConfirmedItemUpdate({
-    repoRoot,
-    env,
-    lane,
-    id: entry.id,
-    fields: { [entry.path]: prior },
-  });
   return { ok: true };
 }
 

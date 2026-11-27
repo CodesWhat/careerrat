@@ -2,6 +2,9 @@
 // PRAGMA user_version as the gate, _migrations as the audit log, ascending
 // application each in its own transaction, gaps/out-of-order rejected.
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { ALL_MIGRATIONS, runMigrations } from "../src/core/db/migrations.mjs";
@@ -344,4 +347,79 @@ test("a failing migration rolls back and leaves user_version at the last fully-a
     logged.map((r) => r.id),
     [1]
   );
+});
+
+test("a migration another process applied after our version read is skipped, not re-run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-migrate-race-"));
+  try {
+    const file = join(dir, "race.db");
+    const list = [
+      {
+        id: 1,
+        name: "init",
+        up: (db) => {
+          db.exec(CREATE_MIGRATIONS_TABLE);
+          db.exec("CREATE TABLE t (x INTEGER)");
+        },
+      },
+    ];
+    const winner = new DatabaseSync(file);
+    const loser = new DatabaseSync(file);
+    // The loser's first user_version read happens before the winner commits.
+    let staleReads = 1;
+    const racing = new Proxy(loser, {
+      get(target, prop) {
+        if (prop === "prepare") {
+          return (sql) => {
+            const stmt = target.prepare(sql);
+            if (sql === "PRAGMA user_version" && staleReads > 0) {
+              staleReads -= 1;
+              return { get: () => ({ user_version: 0 }) };
+            }
+            return stmt;
+          };
+        }
+        const value = target[prop];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    runMigrations(winner, list);
+    const result = runMigrations(racing, list);
+    assert.deepEqual(result.applied, []);
+    assert.equal(result.to, 1);
+    assert.equal(loser.prepare("SELECT COUNT(*) AS n FROM _migrations").get().n, 1);
+    winner.close();
+    loser.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a version above what this build supports, seen only under the lock, is rejected", () => {
+  const db = new DatabaseSync(":memory:");
+  const list = Array.from({ length: 21 }, (_, index) => ({
+    id: index + 1,
+    name: `m${index + 1}`,
+    up: () => {},
+  }));
+  // First read (before the lock) says 20, the recheck under BEGIN IMMEDIATE says 22.
+  const reads = [20, 22];
+  const racing = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "prepare") {
+        return (sql) => {
+          if (sql === "PRAGMA user_version" && reads.length > 0) {
+            const value = reads.shift();
+            return { get: () => ({ user_version: value }) };
+          }
+          return target.prepare(sql);
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  assert.throws(() => runMigrations(racing, list), /newer CareerRat \(schema 22/);
+  assert.throws(() => db.exec("COMMIT"), /no transaction/i, "the lock transaction was rolled back");
+  db.close();
 });

@@ -96,7 +96,7 @@ For each plausible person, record a compact lead:
 - `foundAt`
 
 Store long notes or screenshots under `workspace/network-leads/` when useful. Keep
-the dashboard-facing `relationshipLeads[]` record short and privacy-safe.
+the workspace-facing `relationshipLeads[]` record short and privacy-safe.
 
 Do not infer private emails, do not guess personal contact details, and do not add
 a person as an approved warm path until the candidate approves the lead.
@@ -151,7 +151,7 @@ careerrat tracker
 Add concrete `--company`, `--role`, or `--app-id` refs when the leads map cleanly
 to one tracker row.
 
-The Network dashboard will show pending leads in **Lead review**. Approved leads
+The terminal workspace will show pending leads in **Lead review**. Approved leads
 become Network contacts; rejected leads stay out of the warm-path map.
 
 ## STEP 5 — Approval and outreach

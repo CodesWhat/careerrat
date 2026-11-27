@@ -19,101 +19,169 @@ import {
 const EXPECTED_PROVIDER_IDS = [
   "4dayweek",
   "a16z-speedrun-talent",
+  "adp-myjobs",
+  "adp-workforcenow",
   "agentic-jobs",
+  "aldi-nord",
   "alibaba",
   "amazon",
+  "apple",
+  "applicantpro",
+  "applitrack",
   "arbeitnow",
   "arbeitsagentur",
   "ashby",
+  "atlassian",
   "avature",
   "bamboohr",
   "beesite",
+  "bizneo",
+  "bolt",
   "breezy",
   "builtin",
+  "bulldogjob",
+  "bwi",
+  "careerpuck",
   "careerviet",
+  "clearcompany",
   "collage",
   "comeet",
+  "computrabajo",
   "consider",
   "cryptocurrencyjobs",
   "csod",
+  "darwinbox",
   "dassault",
+  "deel",
   "deutschebahn",
+  "dover",
   "echojobs",
   "eightfold",
+  "eploy",
+  "factorial",
   "feishu-jobs",
   "flowxtra",
   "garena",
   "gem",
+  "generalist-world",
+  "germantechjobs",
   "getonbrd",
   "getro",
   "glints",
+  "goldman",
+  "google",
   "greenhouse",
+  "gupy",
   "hackernews",
   "hecklerkoch",
+  "hibob",
   "higheredjobs",
   "himalayas",
+  "hirehive",
+  "hiringroom",
+  "homerun",
   "ibm",
   "icims",
+  "inhire",
+  "inrecruiting",
+  "itjobs",
   "itviec",
+  "jazzhr",
   "jibeapply",
   "jobbankca",
   "jobicy",
+  "jobscz",
   "jobspresso",
   "jobstreet",
   "jobvite",
   "join",
   "joinup",
   "justjoin",
+  "kalibrr",
+  "kariyer",
+  "keka",
+  "kula",
   "landingjobs",
   "larajobs",
   "lever",
   "local-parser",
+  "magneto",
   "manfred",
   "meituan",
   "mokahr",
   "mycareersfuture",
+  "neogov",
   "nodesk",
   "nofluffjobs",
+  "notion",
+  "occ",
   "oraclecloud",
+  "pageup",
+  "paycom",
+  "paylocity",
+  "peoplesoft",
   "personio",
   "phenom",
   "pinpoint",
+  "platsbanken",
+  "polymer",
+  "pracecz",
+  "prevueaps",
+  "pythonorg",
   "radancy",
   "recruitee",
+  "redrover",
+  "remote-com",
   "remoteok",
   "remotive",
   "remotli",
+  "rexx",
   "rheinmetall",
   "rippling",
+  "schoolspring",
   "senjob",
   "smartrecruiters",
   "softgarden",
   "solidjobs",
+  "startup-jobs",
   "successfactors",
+  "successfactors-classic",
+  "taleez",
+  "talentlink",
+  "taleo",
   "teamtailor",
+  "techinasia",
   "tencent",
+  "tes",
   "thehub",
   "themuse",
   "tkms",
   "torre",
+  "trakstar",
+  "turbohire",
+  "ultipro",
   "vdab",
+  "velorahr",
+  "viterbit",
   "weworkremotely",
   "workable",
   "workday",
   "workingnomads",
+  "wp-job-manager",
   "wttj",
   "yourator",
+  "zoho-recruit",
 ];
 
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
     repository: "https://github.com/career-ops-hq/career-ops",
-    commit: "8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40",
-    providerCount: 87,
+    commit: "13786939dc79e0ec324b5571c9e6f29c50d43b53",
+    providerCount: 157,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 86);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 86);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 154);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 154);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {
@@ -148,7 +216,23 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
     [...upstream].sort(),
     "adopted + deferred must exactly equal the pinned upstream inventory"
   );
-  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 87);
+  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 157);
+  assert.equal(CAREER_OPS_UPSTREAM.providerCount, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length);
+});
+
+test("upstream providers not yet adopted are deferred with a CR70 slice marker", () => {
+  // Slice 0 of CR70 rolled the pin forward without adopting the 70 new
+  // providers. Each later slice moves its ids out of the deferred map, so a
+  // deferred id without a "CR70 slice N pending" reason (other than the
+  // long-standing telegram-channel deferral) means a slice lost track of it.
+  const adopted = new Set(CAREER_OPS_PROVIDER_IDS);
+  const pending = Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS).filter(
+    ([id]) => id !== "telegram-channel"
+  );
+  assert.equal(pending.length, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length - adopted.size - 1);
+  for (const [id, reason] of pending) {
+    assert.match(reason, /^CR70 slice \d+ pending$/, id);
+  }
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {
@@ -245,7 +329,7 @@ test("Career Ops fetch normalizes provider output for CareerRat and marks missin
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://acme.bamboohr.com/careers/list");
-  assert.equal(calls[0].init.redirect, "error");
+  assert.equal(calls[0].init.redirect, "manual");
   assert.match(calls[0].init.headers["user-agent"], /CareerRat/);
   assert.deepEqual(offers, [
     {

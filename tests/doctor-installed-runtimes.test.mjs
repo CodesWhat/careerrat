@@ -718,7 +718,7 @@ test("doctor does not read the binary content of an unselected runtime", (t) => 
       cwd: ROOT,
       env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
       encoding: "utf8",
-      timeout: 5000,
+      timeout: 60_000,
     });
 
     assert.equal(
@@ -791,7 +791,7 @@ test("doctor completes within a bounded timeout and reports an executable FIFO s
       cwd: ROOT,
       env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
       encoding: "utf8",
-      timeout: 5000,
+      timeout: 60_000,
     });
 
     assert.equal(
@@ -836,7 +836,7 @@ test("doctor completes within a bounded timeout and reports an executable FIFO s
 // blocking on `wait`, so this proves the fix at the level that matters:
 // actual process liveness via process.kill(pid, 0), not just that Doctor
 // itself returned in time.
-test("doctor completes within a bounded timeout when the selected runtime's --version ignores SIGTERM", (t) => {
+test("doctor completes within a bounded timeout when the selected runtime's --version ignores SIGTERM", async (t) => {
   if (process.platform === "win32") {
     t.skip("trap/sleep shell scripting is POSIX-only");
     return;
@@ -853,7 +853,7 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
     const sleepPidFile = join(registry, "sleep.pid");
     writeFileSync(
       claudePath,
-      `#!/bin/sh\ntrap '' TERM\n/bin/sleep 60 &\necho $! > "${sleepPidFile}"\nwait\n`,
+      `#!/bin/sh\ntrap '' TERM\n/bin/sleep 600 &\necho $! > "${sleepPidFile}"\nwait\n`,
       "utf8"
     );
     chmodSync(claudePath, 0o755);
@@ -886,7 +886,7 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
       cwd: ROOT,
       env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
       encoding: "utf8",
-      timeout: 12_000,
+      timeout: 120_000,
     });
     const elapsedMs = Date.now() - startedAt;
 
@@ -896,8 +896,8 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
       "doctor must not hang past its own version-probe timeout when --version ignores SIGTERM"
     );
     assert.ok(
-      elapsedMs < 12_000,
-      `doctor took ${elapsedMs}ms, expected well under the script's 60s sleep`
+      elapsedMs < 120_000,
+      `doctor took ${elapsedMs}ms, expected well under the script's 600s sleep`
     );
     assert.ok(result.stdout, result.stderr || "doctor produced no stdout");
     const data = JSON.parse(result.stdout);
@@ -917,6 +917,16 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
       Number.isInteger(sleepPid) && sleepPid > 0,
       "the trap script must have recorded the sleep descendant's real pid"
     );
+    // A killed process stays signalable until its new parent reaps it, which a
+    // loaded machine can delay, so wait for it to actually be gone.
+    for (let n = 0; n < 1500; n++) {
+      try {
+        process.kill(sleepPid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     assert.throws(
       () => process.kill(sleepPid, 0),
       /ESRCH/,

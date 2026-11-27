@@ -273,7 +273,6 @@ test("public docs explain durable background work without claiming interrupted w
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
     workspace: "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
-    runtime: "docs/CHAT_FIRST_RUNTIME.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -414,7 +413,7 @@ test("docs tour the terminal workspace instead of the browser app", async () => 
   assert.match(tour, /\| v \| Review matches/);
   assert.match(tour, /\| a \| Apply/);
   assert.match(tour, /\| c \| Add context/);
-  assert.match(tour, /legacy and is being retired/);
+  assert.match(tour, /retired\s+in\s+v0\.26/);
   assert.doesNotMatch(tour, /\u2014/);
 });
 
@@ -422,7 +421,6 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
   const paths = {
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
-    runtime: "docs/CHAT_FIRST_RUNTIME.md",
     windows: "docs/WINDOWS.md",
     architecture: "docs/ARCHITECTURE.md",
   };
@@ -433,7 +431,7 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
   );
   const combined = Object.values(copy).join("\n");
 
-  for (const name of ["readme", "runtime", "windows", "architecture"]) {
+  for (const name of ["readme", "windows", "architecture"]) {
     assert.match(
       copy[name],
       /CareerRat[\s\S]{0,180}(?:owns|keeps)[\s\S]{0,120}(?:workflows?|threads?)[\s\S]{0,120}provider-neutral/i,
@@ -459,7 +457,6 @@ test("first-run setup presents Claude Code and Codex as choices, not a preferred
   const paths = {
     readme: "README.md",
     install: "apps/docs/content/docs/getting-started/install.mdx",
-    firstRun: "apps/web/src/chat-first/FirstRunExperience.jsx",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -603,7 +600,7 @@ test("website analytics uses the cookieless house PostHog posture, not Vercel An
 test("website metadata is CareerRat-branded", async () => {
   const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
-  assert.match(layout, /CareerRat: Rate\. Apply\. Track\./);
+  assert.match(layout, /CareerRat: AI job search in your terminal/);
   assert.doesNotMatch(layout, new RegExp(LEGACY_BRAND, "i"));
   // Product copy carries no em dashes, and page/OG/Twitter titles and
   // descriptions are product copy: they are the first thing anyone sees in a
@@ -611,7 +608,7 @@ test("website metadata is CareerRat-branded", async () => {
   // code comment (which no user reads) does not fail the suite.
   const metadataCopy = [
     ...layout.matchAll(/^\s*(?:title|description):\s*"([^"]*)"/gm),
-    ...layout.matchAll(/^\s*"(CareerRat is [^"]*)"/gm),
+    ...layout.matchAll(/^\s*"(CareerRat turns [^"]*)"/gm),
   ].map((match) => match[1]);
   // Three titles (page, OG, Twitter) plus the shared siteDescription.
   assert.equal(metadataCopy.length, 4);
@@ -710,7 +707,6 @@ test("docs website source uses the public careerrat CLI convention", async () =>
 
   assert.match(combined, /npm install -g careerrat/);
   assert.match(combined, /careerrat start claude/);
-  assert.match(combined, /careerrat tracker-dev/);
   assert.match(combined, /careerrat automation status/);
   assert.match(combined, /careerrat update/);
   assert.match(combined, /site:dev/);

@@ -151,7 +151,7 @@ test("marks the AI lane failed on a JD artifact-write failure, not just when eve
 });
 
 test("the parent execution record carries failedIds and bounded per-offer recovery metadata through a child artifact failure (CR-29 round 7)", async () => {
-  // src/cli/search-route.mjs's unified AI starter used to discard the
+  // the retired search route's unified AI starter used to discard the
   // child's `value` whenever its run failed, so by the time a real search
   // execution reached this level, `result.lanes.aiWeb.result` would already
   // be missing failedIds/failedOffers even though runUnifiedJobSearch itself

@@ -8,11 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import tls from "node:tls";
-import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
+import { deliverDraftToPerson } from "../src/core/comms/deliver-draft.mjs";
 import { notifyPerson } from "../src/core/comms/person-notify.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
-import { createPersonRoot } from "../src/core/paths/people.mjs";
+import { createPersonRoot, personEnv } from "../src/core/paths/people.mjs";
 import { optIn, setContact } from "../src/core/people/contact.mjs";
 
 let connections;
@@ -36,13 +36,21 @@ afterEach(() => {
   closeAll();
 });
 
-test("communication.send to a recruiter makes no network connection", async (t) => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-recipient-class-"));
-  t.after(() => rmSync(repoRoot, { recursive: true, force: true }));
-  openDb({ repoRoot, env: {} });
+test("delivering a recruiter draft sends only to the person, never the recruiter", async (t) => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "careerrat-recipient-class-")));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  createPersonRoot(base, "david");
+  setContact({ base, name: "david", email: "david@example.com", timezone: "America/Chicago" });
+  optIn({ base, name: "david", channel: "email", evidence: "said yes" });
+  const env = personEnv({
+    repoRoot: base,
+    env: { CAREERRAT_PEOPLE_BASE: base },
+    name: "david",
+  });
+  openDb({ repoRoot: base, env });
   commUpsert({
-    repoRoot,
-    env: {},
+    repoRoot: base,
+    env,
     row: {
       id: "comm-recruiter",
       company: "Acme",
@@ -54,17 +62,25 @@ test("communication.send to a recruiter makes no network connection", async (t) 
       messages: [],
     },
   });
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "communication.send",
-        entity: { type: "communication", id: "comm-recruiter" },
+  const sent = [];
+  await deliverDraftToPerson({
+    repoRoot: base,
+    env,
+    base,
+    name: "david",
+    id: "comm-recruiter",
+    now: new Date("2026-11-02T17:00:00Z"),
+    transportOverride: {
+      transport: {
+        name: "fake",
+        send: async (message) => {
+          sent.push(message.to);
+          return { id: "m1" };
+        },
       },
-    }),
-    (error) => error.code === "COMMUNICATION_EXECUTOR_UNAVAILABLE"
-  );
+    },
+  });
+  assert.deepEqual(sent, ["david@example.com"]);
   assert.deepEqual(connections, []);
 });
 
