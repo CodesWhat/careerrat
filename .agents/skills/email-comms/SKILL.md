@@ -413,7 +413,7 @@ Confirm it exits clean before proceeding. If it fails, fix the JSON (legacy) or 
 
 **(e) Snapshot:**
 
-- **DB workspace:** already exported by the calls above; if `careerrat tracker-dev` is running its `fs.watch` already picked it up. Run `careerrat tracker` only for a recovery checkpoint.
+- **DB workspace:** already exported by the calls above, and an open terminal workspace picks the change up on its own. Run `careerrat tracker` only for a recovery checkpoint.
 - **Legacy workspace (no DB):** run `careerrat tracker`.
 
 Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:

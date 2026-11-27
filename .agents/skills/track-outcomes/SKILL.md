@@ -232,9 +232,8 @@ draft that backed it is gone — then append a note recording what happened.
 
 - **DB workspace:** every `careerrat data <verb>` call in STEP 2/2b already
   re-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write
-  Contract, AGENTS.md). If `careerrat tracker-dev` is running, its `fs.watch` on
-  `tracker.json` already picked this up and live-reloaded the open page —
-  nothing further to do. For a recovery checkpoint, still run:
+  Contract, AGENTS.md). An open terminal workspace picks the change up on its
+  own, so nothing further is needed. For a recovery checkpoint, still run:
 
   ```
   careerrat tracker
