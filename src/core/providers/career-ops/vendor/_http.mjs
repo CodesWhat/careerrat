@@ -17,6 +17,7 @@ export const MACOS_BROWSER_LIKE_USER_AGENT =
 const JITTER_MS = 250;
 const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = "unexpected redirect";
+const CF_CHALLENGE_RE = /\bchallenge\b/i;
 
 export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === "function") return ctx.sleep(ms);
@@ -53,11 +54,36 @@ export function isRefusedRedirectError(err) {
     && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE;
 }
 
+/**
+ * Whether a failed request was a Cloudflare challenge, read from the
+ * `cf-mitigated` header kept on the error as `cfMitigated` (upstream
+ * fetchInContext). A challenge is not throttling, so it is never retried.
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isCloudflareChallenge(err) {
+  return typeof err?.cfMitigated === "string" && CF_CHALLENGE_RE.test(err.cfMitigated);
+}
+
 export function isRetryableError(error) {
   const status = error?.status;
+  if (isCloudflareChallenge(error)) return false;
   if (status === 429) return true;
   if (typeof status === "number" && status >= 500) return true;
   if (isRefusedRedirectError(error)) return false;
+  // An oversize body or a blocked address is deterministic: the same request
+  // fails the same way next time. Neither carries a status, so without these
+  // they would fall through to the network-error case below.
+  if (error?.code === "response_too_large") return false;
+  if (
+    error?.code === "ECAREEROPS_BLOCKED_ADDRESS"
+    || error?.cause?.code === "ECAREEROPS_BLOCKED_ADDRESS"
+  ) {
+    return false;
+  }
+  // A timeout that already ran its full timeoutMs would just time out again.
+  if (error?.timedOut === true) return false;
   return status === undefined;
 }
 
@@ -95,3 +121,6 @@ export function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
   return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
+export function fetchResponseWithRetry(ctx, url, opts = {}, policy = {}) {
+  return withRetry(() => ctx.fetchResponse(url, opts), ctx, policy);
+}

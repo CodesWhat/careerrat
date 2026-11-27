@@ -2,9 +2,51 @@
 
 These provider modules are vendored from
 [`career-ops-hq/career-ops`](https://github.com/career-ops-hq/career-ops) at
-commit `8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40` (September 7, 2026). Upstream
+commit `13786939dc79e0ec324b5571c9e6f29c50d43b53` (November 26, 2026). Upstream
 moved from `santifer/career-ops` to the `career-ops-hq` org on 2026-09-01, the
 repository name is unchanged, only the owner.
+
+Rolled forward 2026-11-27 (CR70 slice 0, foundation only) from
+`8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40`. This roll moves the pin and adds
+the shared plumbing the 70 new upstream providers need; it adopts no provider.
+Every provider file in this directory is still the pre-roll copy, and the 70
+new ids sit in `CAREER_OPS_DEFERRED_PROVIDER_IDS` as "CR70 slice N pending"
+until their slice lands (see `.planning/cr70-slices.md`). Comments stay
+verbatim from upstream; only message strings we emit are re-punctuated.
+
+- New helpers copied verbatim: `_cached-lookup`, `_city-slug`, `_country`,
+  `_department-team`, `_employment-type`, `_html-entity-table`, `_ids`,
+  `_safe-url`, `_salary-text`, `_workplace-type`, `_wp-job-feed`.
+  `_config-utils` and `_html-entities` picked up upstream changes verbatim.
+- New `../lib/` directory (sibling of this one, matching upstream's
+  `providers/../lib/` import path): `board-truncation.mjs` and `parse-date.mjs`
+  verbatim except one em dash in a note string, and `posting-close.mjs`
+  trimmed to `closesAtIso`. Upstream's `closeDatesByUrl`/`closeDateForUrl`
+  read a scan-history file through `scan-history-columns.mjs` and `url-key.mjs`,
+  which CareerRat does not vendor, and no provider imports them.
+- `_http.mjs` stays our shim (every request goes through `guardedFetch`;
+  upstream's transport, `_dns-cache`, `_ip-guard`, `_connection-scope` and
+  `_http-cache` are not vendored, and nothing adopted imports them). It gained
+  `fetchResponseWithRetry`, `isCloudflareChallenge`, and the matching
+  non-retry cases in `isRetryableError` (Cloudflare challenge, oversize body,
+  blocked address, spent timeout). `career-ops-registry.mjs` now keeps the
+  `cf-mitigated` response header on a failed request as `cfMitigated`, which is
+  what `isCloudflareChallenge` reads. Both local User-Agent exports stay.
+  Not yet ported, because only providers in later slices import them:
+  `resolveDefaultTimeoutMs` (teamtailor) and `fetchTextStream` (workable).
+- Hand-merged, local additions kept: `_html-to-text.mjs` takes upstream's
+  tag-start and quadratic-backtracking fixes, `stripHtmlComments`,
+  `replaceScriptStyleBlocks`, `visibleText` and `{ cap }` option, and keeps
+  `htmlToTextCapture`/`capDescriptionText`/`DESCRIPTION_MAX_BYTES`. A bare
+  `htmlToText()` is bounded by `DESCRIPTION_MAX_BYTES`, not upstream's
+  `DESCRIPTION_CAP` default; a caller passing `{ cap }` gets exactly that.
+  `_registry.mjs` and `_types.js` took upstream's changes with the local
+  `fetchDetail`/`descriptionPartial` typedefs carried forward.
+  `_profile-keywords.mjs` is unchanged: upstream's diff only touches the
+  `config/profile.yml` fallback this compatibility module deliberately omits.
+- Not touched: `robots-check.mjs` (only upstream's `sitemap` provider uses it,
+  and it pulls in `_ip-guard`; decide it with slice 18), `_trust-validator`
+  (nothing we adopt imports it).
 
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's

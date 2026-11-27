@@ -108,8 +108,8 @@ const EXPECTED_PROVIDER_IDS = [
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
     repository: "https://github.com/career-ops-hq/career-ops",
-    commit: "8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40",
-    providerCount: 87,
+    commit: "13786939dc79e0ec324b5571c9e6f29c50d43b53",
+    providerCount: 157,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
   assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 86);
@@ -148,7 +148,23 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
     [...upstream].sort(),
     "adopted + deferred must exactly equal the pinned upstream inventory"
   );
-  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 87);
+  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 157);
+  assert.equal(CAREER_OPS_UPSTREAM.providerCount, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length);
+});
+
+test("upstream providers not yet adopted are deferred with a CR70 slice marker", () => {
+  // Slice 0 of CR70 rolled the pin forward without adopting the 70 new
+  // providers. Each later slice moves its ids out of the deferred map, so a
+  // deferred id without a "CR70 slice N pending" reason (other than the
+  // long-standing telegram-channel deferral) means a slice lost track of it.
+  const adopted = new Set(CAREER_OPS_PROVIDER_IDS);
+  const pending = Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS).filter(
+    ([id]) => id !== "telegram-channel"
+  );
+  assert.equal(pending.length, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length - adopted.size - 1);
+  for (const [id, reason] of pending) {
+    assert.match(reason, /^CR70 slice \d+ pending$/, id);
+  }
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {
