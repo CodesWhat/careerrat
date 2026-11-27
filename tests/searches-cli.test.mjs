@@ -106,7 +106,7 @@ test("careerrat searches --providers exposes the complete pinned parity manifest
   assert.equal(result.status, 0, result.stderr);
   const body = JSON.parse(result.stdout);
   assert.equal(body.upstream.providerCount, 157);
-  assert.equal(body.providers.filter((provider) => provider.status === "implemented").length, 153);
+  assert.equal(body.providers.filter((provider) => provider.status === "implemented").length, 154);
   assert.deepEqual(
     body.providers.find((provider) => provider.id === "local-parser"),
     {
