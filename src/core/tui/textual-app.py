@@ -1430,7 +1430,8 @@ class CareerRatApp(App):
                 lambda choice: self.pick_person(value.get("current"), choice),
             )
         elif kind == "person":
-            # Still locked: the switch ends when the destination's snapshot lands.
+            # Still locked: the switch ends on the bridge's switch-complete (the
+            # snapshot normally lands first and clears awaiting_snapshot).
             self.generation = value.get("generation", self.generation)
             self.switching = True
             self.awaiting_snapshot = True
@@ -1438,6 +1439,17 @@ class CareerRatApp(App):
         elif kind == "switch-end":
             self.switching = False
             self.awaiting_snapshot = False
+        elif kind == "switch-complete":
+            # The destination is open. If its snapshot never landed (skipped as
+            # oversized), unlock anyway and say why the jobs list is stale.
+            skipped = self.awaiting_snapshot
+            self.switching = False
+            self.awaiting_snapshot = False
+            if skipped:
+                self.show_message(
+                    "Switched, but the workspace was too large to show and was skipped.",
+                    hold=HOLD_SECONDS,
+                )
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
