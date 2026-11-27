@@ -44,7 +44,7 @@ test("ACP permission fuzzing never grants a state-changing tool kind", () => {
   );
 });
 
-test("ACP permission fuzzing rejects provider-supplied read paths and allows only the staged-input tool", () => {
+test("ACP permission fuzzing rejects provider-supplied read paths and the retired staged-input tool", () => {
   fc.assert(
     fc.property(fc.array(segment, { minLength: 1, maxLength: 5 }), (segments) => {
       const relativePath = segments.join("/");
@@ -82,7 +82,7 @@ test("ACP permission fuzzing rejects provider-supplied read paths and allows onl
       });
       assert.notEqual(selectedOption(inside), "allow");
       assert.notEqual(selectedOption(outside), "allow");
-      assert.equal(selectedOption(staged), "allow");
+      assert.notEqual(selectedOption(staged), "allow");
     }),
     { numRuns: 300 }
   );

@@ -244,8 +244,208 @@ closeAll();
         self.assertTrue(app.switching, "still locked after the person event")
         self.assertFalse(app.check_action("add_context", ()))
         await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        self.assertTrue(app.switching, "the snapshot alone does not unlock")
+        self.assertFalse(app.check_action("add_context", ()))
+        await app.handle_event({"type": "switch-complete"})
         self.assertFalse(app.switching)
         self.assertEqual([c[0] for c in calls], ["person", "workspace"])
+
+    async def test_a_person_event_clears_the_rendered_workspace_even_when_the_snapshot_is_skipped(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-stale-") as folder:
+            base = Path(folder)
+            (base / "workspace").mkdir(parents=True)
+            (base / "workspace/tracker.json").write_text(
+                json.dumps(
+                    {
+                        "applications": [
+                            {
+                                "id": "ownerco",
+                                "company": "OwnerCo",
+                                "role": "Lead",
+                                "status": "applied",
+                            }
+                        ]
+                    }
+                )
+            )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 1)
+                # The destination's snapshot is skipped: only person, then switch-complete.
+                await app.handle_event({"type": "person", "person": "ada", "generation": 5})
+                self.assertTrue(app.switching)
+                self.assertEqual(table.row_count, 0, "stale rows are gone")
+                self.assertIsNone(app.selected_id)
+                self.assertEqual(app.rendered_ids, [])
+                inspector_text = " ".join(
+                    str(w.renderable)
+                    for w in app.query("#inspector Static")
+                    if hasattr(w, "renderable")
+                )
+                self.assertNotIn("OwnerCo", inspector_text)
+                self.assertFalse(app.check_action("add_context", ()))
+                await app.handle_event({"type": "switch-complete"})
+                self.assertFalse(app.switching)
+                self.assertEqual(table.row_count, 0)
+                await pilot.press("ctrl+q")
+
+    async def test_a_person_event_clears_every_filter_control_and_the_snapshot_repopulates_all_four(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-filters-") as folder:
+            base = Path(folder)
+            (base / "workspace").mkdir(parents=True)
+            (base / "workspace/tracker.json").write_text(
+                json.dumps(
+                    {
+                        "applications": [
+                            {"id": "ownerco", "company": "OwnerCo", "role": "Lead", "status": "applied"}
+                        ]
+                    }
+                )
+            )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                status = app.query_one("#status", Select)
+                currency = app.query_one("#currency", Select)
+                basis = app.query_one("#basis", Select)
+                order = app.query_one("#order", Select)
+                # Leave the last person's non-default filters showing.
+                with app.prevent(Select.Changed):
+                    status.set_options([("Active", "active"), ("All statuses", "all"), ("Offer", "offer")])
+                    status.value = "offer"
+                    currency.set_options([("EUR", "EUR"), ("USD", "USD")])
+                    currency.value = "EUR"
+                    basis.value = "annual-earnings"
+                    order.value = "asc"
+                currency.set_class(True, "multi")
+                app.stage_options = {"active": "Active", "all": "All statuses", "offer": "Offer"}
+                await app.handle_event({"type": "person", "person": "ada", "generation": 2})
+                self.assertEqual(status.value, "active")
+                self.assertEqual(currency.value, "USD")
+                self.assertEqual(basis.value, "base")
+                self.assertEqual(order.value, "desc")
+                self.assertEqual(app.stage_options, {})
+                self.assertFalse(currency.has_class("multi"))
+                self.assertFalse(app.query_one("#currency-label").has_class("multi"))
+                # The destination's snapshot repopulates all four.
+                view = {
+                    "jobs": [],
+                    "total": 0,
+                    "mode": "list",
+                    "selectedId": None,
+                    "stages": [{"id": "closed", "label": "Closed"}],
+                    "currency": "GBP",
+                }
+                state = {
+                    "stage": "closed",
+                    "currency": "GBP",
+                    "basis": "annual-earnings",
+                    "order": "asc",
+                }
+                app.update_workspace({"type": "workspace", "view": view, "state": state})
+                self.assertEqual(status.value, "closed")
+                self.assertEqual(currency.value, "GBP")
+                self.assertEqual(basis.value, "annual-earnings")
+                self.assertEqual(order.value, "asc")
+                await pilot.press("ctrl+q")
+
+    async def test_a_switch_unlocks_when_the_request_cannot_be_sent_or_the_bridge_closes(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        app.show_message = lambda *a, **k: None
+        app.show_agent_status = lambda *a, **k: None
+        # No bridge process at all: the request is never delivered.
+        app.proc = None
+        app.switching = True
+        app.awaiting_snapshot = True
+        await app.send({"op": "switch-person", "person": "ada"})
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+
+        class BrokenStdin:
+            def write(self, data):
+                raise BrokenPipeError()
+
+        app.proc = SimpleNamespace(returncode=None, stdin=BrokenStdin())
+        app.switching = True
+        await app.send({"op": "switch-person", "person": None})
+        self.assertFalse(app.switching)
+
+        # The bridge exits while a switch is open.
+        async def wait():
+            return 0
+
+        app.proc = SimpleNamespace(returncode=0, wait=wait)
+        app.stderr_reader = None
+        app.snapshot = {"state": {}}
+        app.switching = True
+        app.awaiting_snapshot = True
+        await app.bridge_closed()
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+
+    async def test_a_bridge_read_error_mid_switch_clears_the_switch_lock(self):
+        class BrokenStdout:
+            async def readline(self):
+                raise ConnectionResetError("reset")
+
+            async def read(self, n=-1):
+                raise ConnectionResetError("reset")
+
+            async def readuntil(self, separator=b"\n"):
+                raise ConnectionResetError("reset")
+
+        shim = SimpleNamespace(
+            proc=SimpleNamespace(stdout=BrokenStdout()),
+            stopping=False,
+            errors=[],
+            switching=True,
+            awaiting_snapshot=True,
+            show_message=lambda *a, **k: None,
+            write_log=lambda *a, **k: None,
+        )
+        await MODULE.CareerRatApp.read_events(shim)
+        self.assertFalse(shim.switching)
+        self.assertFalse(shim.awaiting_snapshot)
+        self.assertEqual(len(shim.errors), 1)
+
+    async def test_switch_complete_unlocks_when_the_snapshot_was_skipped(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        messages = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: None
+        app.update_workspace = lambda value: None
+        app.show_message = lambda text, hold=None: messages.append(text)
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        self.assertTrue(app.switching)
+        # The oversized snapshot never arrives; the bridge still ends the switch.
+        await app.handle_event({"type": "switch-complete"})
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("too large", messages[0])
+
+    async def test_switch_complete_after_a_delivered_snapshot_adds_no_notice(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        messages = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: None
+        app.update_workspace = lambda value: None
+        app.show_message = lambda text, hold=None: messages.append(text)
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        await app.handle_event({"type": "switch-complete"})
+        self.assertFalse(app.switching)
+        self.assertEqual(messages, [])
 
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"

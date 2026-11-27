@@ -1293,15 +1293,21 @@ class CareerRatApp(App):
         if self.switching and message.get("op") not in ("switch-person", "resize", "quit"):
             return
         message = {"generation": self.generation, **message}
+        delivered = False
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.stdin.write((json.dumps(message) + "\n").encode())
                 await self.proc.stdin.drain()
+                delivered = True
             except (BrokenPipeError, ConnectionResetError):
                 if not self.stopping:
                     self.show_message(
                         "Workspace connection closed. Saved data remains available."
                     )
+        if not delivered and message.get("op") == "switch-person":
+            # The bridge will never answer this request, so nothing else ends the lock.
+            self.switching = False
+            self.awaiting_snapshot = False
 
     async def resize_agent(self):
         if self.proc and not self.stopping:
@@ -1388,6 +1394,9 @@ class CareerRatApp(App):
                         self.show_message(str(error), hold=HOLD_SECONDS)
             await self.bridge_closed()
         except (ValueError, OSError) as error:
+            # A switch the bridge can no longer finish must not stay locked.
+            self.switching = False
+            self.awaiting_snapshot = False
             self.errors.append(str(error))
             self.write_log(f"bridge read error: {error}")
             if not self.stopping:
@@ -1408,6 +1417,9 @@ class CareerRatApp(App):
             )
             return
         self.bridge_code = code or 0
+        # A switch the bridge never finished can't finish now.
+        self.switching = False
+        self.awaiting_snapshot = False
         self.write_log(f"bridge exited with code {code}")
         text = "Workspace connection closed. Quit and reopen to reconnect."
         if code:
@@ -1421,16 +1433,17 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
-            if self.awaiting_snapshot:
-                self.awaiting_snapshot = False
-                self.switching = False
+            # The switch stays locked until switch-complete, whether or not
+            # this snapshot was the one the switch was waiting on.
+            self.awaiting_snapshot = False
         elif kind == "people":
             self.push_screen(
                 PersonPicker(value["people"], value.get("current")),
                 lambda choice: self.pick_person(value.get("current"), choice),
             )
         elif kind == "person":
-            # Still locked: the switch ends when the destination's snapshot lands.
+            # Still locked: the switch ends on the bridge's switch-complete (the
+            # snapshot normally lands first and clears awaiting_snapshot).
             self.generation = value.get("generation", self.generation)
             self.switching = True
             self.awaiting_snapshot = True
@@ -1438,6 +1451,17 @@ class CareerRatApp(App):
         elif kind == "switch-end":
             self.switching = False
             self.awaiting_snapshot = False
+        elif kind == "switch-complete":
+            # The destination is open. If its snapshot never landed (skipped as
+            # oversized), unlock anyway and say why the jobs list is stale.
+            skipped = self.awaiting_snapshot
+            self.switching = False
+            self.awaiting_snapshot = False
+            if skipped:
+                self.show_message(
+                    "Switched, but the workspace was too large to show and was skipped.",
+                    hold=HOLD_SECONDS,
+                )
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
@@ -1548,10 +1572,58 @@ class CareerRatApp(App):
         self.job_ids = []
         self.job_cells = []
         self.query_one("#request", Input).value = ""
+        self.clear_rendered_workspace()
+        self.reset_filter_controls()
         self.show_person(person)
         self.write_terminal(f"\x1b]2;CareerRat{' · ' + person if person else ''}\x07")
         self.query_one(NativePane).clear_frame()
         self.call_after_refresh(self.resize_agent)
+
+    def reset_filter_controls(self):
+        """Put the status, currency, pay basis and order controls back to their defaults.
+
+        The destination's snapshot repopulates all four; until it does (or if it is
+        skipped), nothing from the last person's filters stays showing.
+        """
+        self.stage_options = {}
+        status_options = [("Active", "active"), ("All statuses", "all")]
+        currency_options = [("USD", "USD")]
+        with self.prevent(Select.Changed):
+            status = self.query_one("#status", Select)
+            status.set_options(status_options)
+            self.fit_select(status, status_options)
+            status.value = "active"
+            self.size_select(status)
+            currency = self.query_one("#currency", Select)
+            currency.set_options(currency_options)
+            self.fit_select(currency, currency_options)
+            currency.value = "USD"
+            self.size_select(currency)
+            currency.set_class(False, "multi")
+            self.query_one("#currency-label").set_class(False, "multi")
+            self.query_one("#basis", Select).value = "base"
+            self.query_one("#order", Select).value = "desc"
+
+    def clear_rendered_workspace(self):
+        """Empty the jobs table and inspector, so nothing from the last workspace stays clickable."""
+        table = self.query_one("#jobs", DataTable)
+        self.updating = True
+        try:
+            table.clear()
+        finally:
+            self.updating = False
+        self.rendered_ids = []
+        self.rendered_rows = []
+        table.border_title = "Saved jobs"
+        self.update_details(None)
+        self.set_text("workspace-history-text", "Switching workspace…", empty=True)
+        for slot in range(RUN_SLOTS):
+            self.query_one(f"#run-{slot}").display = False
+        self.query_one("#activity-empty").display = True
+        self.query_one("#change-controls").display = False
+        self.query_one("#changes-position", Static).display = False
+        self.query_one("#changes-text", Static).display = False
+        self.query_one("#changes-empty").display = True
 
     def ring_bell(self):
         """The agent rang the bell: pass it to the outer terminal, at most once a second."""
@@ -1692,6 +1764,8 @@ class CareerRatApp(App):
                 multi = len(currencies) > 1
                 currency.set_class(multi, "multi")
                 self.query_one("#currency-label").set_class(multi, "multi")
+                self.query_one("#basis", Select).value = state.get("basis", "base")
+                self.query_one("#order", Select).value = state.get("order", "desc")
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)

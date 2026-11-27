@@ -11,7 +11,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,7 +37,6 @@ import {
   probeInstalledRuntimeCompletion,
   probeInstalledRuntime as probeInstalledRuntimeCore,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
-  readInstalledRuntimeScopedFile,
   runInstalledRuntime as runInstalledRuntimeCore,
   runInstalledRuntimeStream as runInstalledRuntimeStreamCore,
   runtimeSearchDirectories,
@@ -3436,32 +3434,20 @@ test("Codex public-web invocation uses supported per-call search and MCP config"
   }
 });
 
-test("claude exact-read invocation fails closed for missing, outside, and symlink-aliased paths", () => {
-  const repoRoot = tempRepoWithOneSkill("resume-extract");
-  const uploadDir = join(repoRoot, "workspace", "intake", "resume-uploads");
-  const outside = join(repoRoot, "workspace", "tracker.json");
-  const target = join(uploadDir, "resume.pdf");
-  const alias = join(uploadDir, "alias.pdf");
-  mkdirSync(uploadDir, { recursive: true });
-  writeFileSync(outside, "tracker", "utf8");
-  writeFileSync(target, "resume", "utf8");
-  symlinkSync(target, alias);
-
+test("claude exact-read invocation fails closed because no skill takes a saved upload", () => {
+  const repoRoot = tempRepoWithOneSkill("evaluate-job");
   try {
-    for (const approvedReadPaths of [[], [join(uploadDir, "missing.pdf")], [outside], [alias]]) {
-      assert.throws(
-        () =>
-          buildInstalledRuntimeInvocation({
-            runtimeId: "claude",
-            executablePath: "/safe/claude",
-            repoRoot,
-            approvedReadPaths,
-            tools: ["Read", "Skill"],
-            skill: "resume-extract",
-          }),
-        { code: "RUNTIME_READ_BOUNDARY_INVALID" }
-      );
-    }
+    assert.throws(
+      () =>
+        buildInstalledRuntimeInvocation({
+          runtimeId: "claude",
+          executablePath: "/safe/claude",
+          repoRoot,
+          tools: ["Read", "Skill"],
+          skill: "evaluate-job",
+        }),
+      { code: "RUNTIME_READ_BOUNDARY_INVALID" }
+    );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -3527,50 +3513,14 @@ test("CareerRat public-web fetch delegates public URLs to the DNS-pinned guarded
   assert.match(result.content[0].text, /Remote role/);
 });
 
-test("CareerRat scoped read returns only the staged input and rejects alternate or unsafe inputs", () => {
+test("the scoped-tools child speaks MCP JSON-RPC for discovery and rejection", async () => {
   const root = tempRoot();
-  const input = join(root, "resume.md");
-  const sibling = join(root, "private.md");
-  const alias = join(root, "alias.md");
-  writeFileSync(input, "approved resume evidence", "utf8");
-  writeFileSync(sibling, "private sibling", "utf8");
-  symlinkSync(sibling, alias);
-
-  try {
-    const accepted = readInstalledRuntimeScopedFile(input);
-    assert.equal(accepted.isError, undefined);
-    assert.deepEqual(accepted.content, [{ type: "text", text: "approved resume evidence" }]);
-
-    for (const rejected of [
-      readInstalledRuntimeScopedFile(input, { input: { path: sibling } }),
-      readInstalledRuntimeScopedFile(input, { input: { path: "../private.md" } }),
-      readInstalledRuntimeScopedFile(alias),
-      readInstalledRuntimeScopedFile(input, { maxBytes: 4 }),
-    ]) {
-      assert.equal(rejected.isError, true);
-      assert.match(rejected.content[0].text, /rejected/i);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("the scoped-tools child speaks MCP JSON-RPC for discovery, staged read, and rejection", async () => {
-  const root = tempRoot();
-  const stagedPath = join(root, "approved.txt");
-  writeFileSync(stagedPath, "approved staged input", "utf8");
   const modulePath = fileURLToPath(
     new URL("../src/core/ai/installed-runtimes.mjs", import.meta.url)
   );
   const child = spawn(
     process.execPath,
-    [
-      modulePath,
-      "--careerrat-scoped-tools",
-      "--allow-public-web",
-      "--approved-read-file",
-      stagedPath,
-    ],
+    [modulePath, "--careerrat-scoped-tools", "--allow-public-web"],
     { stdio: ["pipe", "pipe", "pipe"], shell: false }
   );
   let stdout = "";
@@ -3621,9 +3571,9 @@ test("the scoped-tools child speaks MCP JSON-RPC for discovery, staged read, and
         .get(2)
         .result.tools.map(({ name }) => name)
         .sort(),
-      ["fetch", "read_staged_input"]
+      ["fetch"]
     );
-    assert.equal(byId.get(3).result.content[0].text, "approved staged input");
+    assert.equal(byId.get(3).error.code, -32601, "the retired staged-read tool is gone");
     assert.equal(byId.get(4).error.code, -32601);
     assert.deepEqual(byId.get(5).result, {});
   } finally {
