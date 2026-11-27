@@ -350,10 +350,10 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
       "## Principles",
       "## Decision Matrix",
       "## Caller Rules",
-      "### UI",
+      "### Terminal workspace",
       "### CLI",
       "### Agents",
-      "## Existing Route Owners",
+      "## Existing Owners",
       "## No-AI Degradation",
       "## Examples",
       "## Drift Checks",
@@ -381,21 +381,21 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
   assertContainsAll(
     routingPolicyText,
     [
-      "/api/search/scan",
-      "/api/data/*",
+      "careerrat search",
+      "careerrat data",
       "DB verb or CLI helper",
       "bounded structured AI",
-      "/api/chat/*",
-      "POST /api/skill/run",
+      "visible agent session",
+      "runSkillStream",
     ],
     artifactPaths.routingPolicy
   );
 
-  const ui = requiredSection(routingPolicyText, "### UI", "### CLI");
-  assert.match(ui, /local API routes/i);
-  assert.match(ui, /\/api\/data\/\*/);
+  const ui = requiredSection(routingPolicyText, "### Terminal workspace", "### CLI");
+  assert.match(ui, /local owners/i);
+  assert.match(ui, /careerrat data/);
   assert.match(ui, /bounded AI/i);
-  assert.match(ui, /POST \/api\/skill\/run/);
+  assert.match(ui, /full skill runtime/i);
 
   const cli = requiredSection(routingPolicyText, "### CLI", "### Agents");
   assert.match(cli, /DB verbs and existing CLI helpers/i);
@@ -403,10 +403,10 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
   assert.match(cli, /bounded AI/i);
   assert.match(cli, /skill or chat runtimes/i);
 
-  const agents = requiredSection(routingPolicyText, "### Agents", "## Existing Route Owners");
-  assert.match(agents, /deterministic route, DB verb, CLI helper, or\s+bounded AI owner/i);
-  assert.match(agents, /\/api\/chat\/\*/);
-  assert.match(agents, /POST \/api\/skill\/run/);
+  const agents = requiredSection(routingPolicyText, "### Agents", "## Existing Owners");
+  assert.match(agents, /deterministic owner, DB verb, CLI helper, or\s+bounded AI owner/i);
+  assert.match(agents, /visible agent session/i);
+  assert.match(agents, /full skill runtime/i);
 });
 
 test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 coverage", () => {

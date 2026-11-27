@@ -156,8 +156,8 @@ workspace/interview-prep/<company>-<role>.md
 (Use the slug from the tracker row. Create `workspace/interview-prep/` if
 absent.)
 
-This `.md` is also the source for the dashboard Focus-card **"Open dossier"**
-full-page preview — STEP 6 persists a copy onto `app.artifacts.interviewDossier`
+This `.md` is also the source for the terminal workspace's Focus interview
+**"Open dossier"** preview — STEP 6 persists a copy onto `app.artifacts.interviewDossier`
 so the featured interview always has a dossier to open.
 
 **In-interview usability contract (hard).** A packet is read in two modes, and the
@@ -389,7 +389,7 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    detail must record that gap, never silently drop it or gate the bank on it.
    `stories add --write` auto-mirrors `open_questions` into
    `tracker.storyEnrichment`, which raises a self-clearing **"give me more context"**
-   card in the dashboard Next Steps queue (one per thin story, "Give context"
+   card in the terminal workspace Next Steps queue (one per thin story, "Give context"
    action). When the candidate fills a gap, drop that string from `open_questions`
    and re-`add --write`; the card clears on the next sync. (If you edit
    `stories.yml` outside the CLI, run `careerrat stories sync-enrichment --write`
@@ -716,7 +716,7 @@ that didn't land or got refuted is a note for the candidate, not a silent edit.
 When the debrief surfaces a detail that would strengthen a story but you don't have
 yet (a number to confirm, a concrete before/after, a claim that conflicts with the
 committed code), add it to that story's `open_questions[]` per STEP 2b step 4 — the
-re-`add --write` mirrors it into `tracker.storyEnrichment` and the dashboard raises a
+re-`add --write` mirrors it into `tracker.storyEnrichment` and the terminal workspace raises a
 "give me more context" card. Don't gate the debrief on it; bank now, flag the gap.
 
 **Recording:** If the user consented to recording, set `recording` to the source
@@ -830,7 +830,7 @@ scheduled/upcoming interview — that single line is what the Focus card shows.
 
 **Persist the dossier for the Focus-card preview.** The dashboard promotes a row as the Focus interview **only** when `app.interviewAt` or `app.nextInterviewAt` is a structured ISO datetime that is in the future. Do NOT write `artifacts.interviewDossier` unless one of those fields is set and its datetime is in the future — writing a dossier onto a rejected, stale, or unscheduled row creates an orphaned artifact that can never appear on the Focus card. If neither field is set, do not generate a dossier: ask the user for the interview datetime, or hand off to `schedule-meeting` to book the slot and write the canonical datetime first, then return here.
 
-When a future `interviewAt` / `nextInterviewAt` is confirmed, the dashboard auto-promotes the row as the featured/adaptive Focus item and its **"Open dossier"** button opens the prep packet full-page (NOT the generic job drawer). So whenever you build a packet (STEP 2) for a confirmed upcoming interview, also write the rendered packet onto the row so the preview has something to show:
+When a future `interviewAt` / `nextInterviewAt` is confirmed, the terminal workspace auto-promotes the row as the featured/adaptive Focus item and its **"Open dossier"** action opens the prep packet (not the generic job view). So whenever you build a packet (STEP 2) for a confirmed upcoming interview, also write the rendered packet onto the row so the preview has something to show:
 
 ```json
 "artifacts": {
@@ -854,7 +854,7 @@ interview" prompt rather than a broken preview.
 
 - `app.status` → the matching pipeline stage (e.g. `"interviewing"`)
 - `app.stage` → the round label (e.g. `"Recruiter screen"`, `"Hiring manager"`, `"Onsite"`)
-- `app.interviewAt` → full ISO datetime string including timezone (e.g. `"2026-07-10T14:00:00-07:00"`). Use `nextInterviewAt` when there are multiple confirmed future rounds and a current round is already set. **Never write `nextInterviewDate` — the dashboard does not read it.** **No-overwrite guard:** `schedule-meeting` is the booking authority for these fields. Only write `interviewAt` / `nextInterviewAt` when the current value is absent or is a past datetime — if a future datetime is already set and the invite context shows a *different* time, do not silently overwrite it; flag the discrepancy to the user and hand the reschedule to `schedule-meeting`.
+- `app.interviewAt` → full ISO datetime string including timezone (e.g. `"2026-07-10T14:00:00-07:00"`). Use `nextInterviewAt` when there are multiple confirmed future rounds and a current round is already set. **Never write `nextInterviewDate` — the terminal workspace does not read it.** **No-overwrite guard:** `schedule-meeting` is the booking authority for these fields. Only write `interviewAt` / `nextInterviewAt` when the current value is absent or is a past datetime — if a future datetime is already set and the invite context shows a *different* time, do not silently overwrite it; flag the discrepancy to the user and hand the reschedule to `schedule-meeting`.
 - `jobs[].nextAction` → `"Attend interview — <date>"` (e.g. `"Attend interview — Thu Jul 10"`)
 - `jobs[].nextActionDue` → the same ISO date
 

@@ -1,6 +1,6 @@
 # Architecture
 
-CareerRat is organized around deterministic local APIs, bounded AI assists,
+CareerRat is organized around deterministic local code, bounded AI assists,
 explicit chat handoffs, and retained skill runtime.
 
 ## Flow
@@ -116,7 +116,7 @@ Routes are grouped below by cluster.
 
 ## Layers
 
-### Local API and DB Layer
+### CLI and DB Layer
 
 Deterministic code owns the default app path:
 
@@ -135,7 +135,7 @@ work, not generated tracker files or model output.
 
 ### CareerRat-owned private-account browser workflows
 
-The in-app private-account browser workflows read permitted Apple Mail, Gmail,
+The private-account browser workflows read permitted Apple Mail, Gmail,
 Outlook, LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces
 without delegating the product action to the selected agent CLI. Their contextual
 permissions remain off by default and are checked per capability and platform.
@@ -175,37 +175,36 @@ The public-intel scanner path is local-first:
    validation passes.
 6. Put only ambiguous or conflicting findings in the public-intel review queue.
 
-Public-intel routes live under `/api/discovery/public-intel/*`. They return
-local API envelopes and do not start chat, call `POST /api/skill/run`, or write
-source config except through explicit supported-ATS review approval.
+Public-intel state lives behind DB verbs in `src/core/db/verbs/public-intel.mjs`
+(review list and decision, sync preview, sync state) and the scrub validation in
+`src/core/discovery/public-intel-scrub.mjs`. Nothing in this lane starts chat,
+runs a skill, or writes source config except through explicit supported-ATS
+review approval.
 
 The apply-packet engine is also local-first. Ordinary product packet work uses
-`src/cli/packet-route.mjs` and the `src/core/packet/*` services instead of
-launching retained skills:
+the `src/core/packet/*` services instead of launching retained skills. The CLI
+verbs and core modules that reach them:
 
-- `POST /api/packet/gate` runs the packet gate through
-  `src/core/packet/gate.mjs`, with bounded schema-validated AI only when finite
+- The packet gate runs through `src/core/packet/gate.mjs` (also reached from
+  `careerrat evaluate`), with bounded schema-validated AI only when finite
   body-read judgment is needed.
-- `POST /api/packet/questions` captures supported provider or pasted
-  application questions through `src/core/packet/questions.mjs` and
-  `src/core/apply/form-questions.mjs`.
-- `POST /api/packet/answers` drafts non-EEO answers through
-  `src/core/packet/answers.mjs`.
-- `POST /api/packet/generate` builds the ATS-ready packet through
-  `src/core/packet/context.mjs`, `src/core/packet/generate.mjs`, document
-  tailoring helpers, and DB-owned artifact registration.
-- `POST /api/packet/export` creates user-facing packet exports through
+- Application questions are captured by `careerrat questions` through
+  `src/core/packet/questions.mjs` and `src/core/apply/form-questions.mjs`.
+- Non-EEO answers are drafted by `src/core/packet/answers.mjs`.
+- The ATS-ready packet is built by `src/core/packet/context.mjs`,
+  `src/core/packet/generate.mjs`, document tailoring helpers, and DB-owned
+  artifact registration.
+- User-facing exports come from `careerrat export`, through
   `src/core/packet/exports.mjs` and `src/core/documents/export.mjs`.
 
-Packet APIs write canonical application artifacts through SQLite DB verbs. They
+Packet services write canonical application artifacts through SQLite DB verbs. They
 do not treat generated `.careerrat/workspace/tracker.json` or `.careerrat/workspace/activity.jsonl` exports as
 product source of truth. Generated packet source markdown and manifests remain
 internal artifacts; user-facing exports default to PDF. DOCX is generated only
 when an upload requirement requests it or a user explicitly selects it. EEO,
 disability, veteran, demographic, and other voluntary self-identification
 questions are excluded from AI drafting. They stay blank by default and may be
-filled only from an explicit saved local policy or exact answer in **Profile >
-Application defaults**. That setting is redacted from agent context, so no model
+filled only from an explicit saved local policy or exact answer in the local application defaults. That setting is redacted from agent context, so no model
 can infer or rewrite it. Packet generation prepares materials only and does not
 submit applications automatically.
 
@@ -240,15 +239,16 @@ terminal workspace instead of hiding a background runtime handoff.
 
 ### Bounded Skill and Chat Runtime
 
-The one-shot skill runner exposes no skills directly. App workflows, browser work, and durable mutations stay behind their
-typed routes and the workspace agent. The generic chat surface exposes only
-`ingest-profile`, `research-boards`, `research-company`, `research-comp`, and
-`company-health`. Company discovery stays on the app-owned reviewed proposal
-path, and `search-jobs` stays on its dedicated AI web-search route.
-`CAREERRAT_RUNTIME_SKILLS` controls only the generic `POST /api/skill/run`
-surface. An explicitly empty generic allowlist does not disable dedicated,
-app-owned routes such as AI web search; each dedicated route grants only its
-own scoped skill for that call.
+The one-shot skill runner exposes no skills directly. App workflows, browser
+work, and durable mutations stay behind their CLI verbs and core modules. The
+generic chat surface exposes only `ingest-profile`, `research-boards`,
+`research-company`, `research-comp`, and `company-health`. Company discovery
+stays on the reviewed proposal path, and `search-jobs` stays on its
+dedicated AI web-search path in `src/core/search/ai-web-search.mjs`.
+`CAREERRAT_RUNTIME_SKILLS` (read in `src/core/ai/skill-runtime.mjs`) controls
+only the generic skill runner allowlist. An explicitly empty generic allowlist
+does not disable dedicated paths such as AI web search; each one
+grants only its own scoped skill for that call.
 
 CareerRat owns the workflow executor, durable threads, context assembly, and
 write-back. That product layer is provider-neutral. Runtime adapters translate a
@@ -282,7 +282,7 @@ ready. Fixed invocation, authentication, capability, cancellation, and output
 checks decide what the app can actually offer.
 
 Visible chat handoffs are separate from app-default actions. They are explicit
-user-selected sessions, not hidden fallbacks from local API errors.
+user-selected sessions, not hidden fallbacks from local errors.
 
 The terminal workspace is the product surface. First-run state, workspace
 operations, and agent-led handoffs all stay inside it.
@@ -302,7 +302,7 @@ Skills define workflow contracts and judgment gates:
 - what to include in an interview packet
 
 Product runtime decomposes those contracts into the cheapest correct owner:
-local APIs and DB verbs first, bounded AI for finite judgment, chat handoff for
+CLI verbs, core modules and DB verbs first, bounded AI for finite judgment, chat handoff for
 turn-by-turn work, and full skill runtime only when the tool loop is actually
 needed.
 

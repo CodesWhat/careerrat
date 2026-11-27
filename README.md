@@ -346,7 +346,7 @@ Your workspace stays on your machine and can be exported.
   works as a manual check-and-download action. Windows self-update stays off
   until its installed app and final installer share a complete signing chain.
 - The public website uses cookieless, privacy-limited aggregate analytics. The
-  local app does not load that website analytics client.
+  CareerRat itself does not load that website analytics client.
 
 Read the full [privacy documentation](https://careerrat.com/docs/advanced/privacy),
 and [data contract](docs/DATA_CONTRACT.md).

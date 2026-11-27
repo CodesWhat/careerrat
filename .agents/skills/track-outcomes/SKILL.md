@@ -257,7 +257,7 @@ Review any follow-ups now due and hand off to `email-comms` if a draft is needed
 
 **Ghost CTA check:** verify that no `communications[]` record for this job still shows `comm.nextActionDue` in the past, a non-null `comm.draft`, or `comm.status` in a stale state after a terminal app outcome. If found, STEP 2b was missed — go back and apply the comm write-back before continuing (DB mode: re-run the `comm upsert` patch).
 
-Log the outcome to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md), picking the type by what happened:
+Log the outcome to the Activity Pulse feed (the terminal workspace's activity log — see **Activity Pulse** in AGENTS.md), picking the type by what happened:
 
 - **DB workspace:** STEP 2's `app set-status` call already auto-logged one
   generic `status_change` event (and STEP 2b's `comm upsert`/`comm
