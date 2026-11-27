@@ -181,20 +181,23 @@ where `<step>` is `research-boards` or `discover-companies`, so doctor,
 
 ## Runtime Routing for Company Discovery
 
-The default for company discovery is the local company proposal path, owned by
-`careerrat companies` and the code under `src/core/discovery/`: proposal batches
-are created, read and decided there. Bounded AI may supply
-company seed judgment only; seed output is advisory until deterministic
-validation, resolver/scanner/gate checks, and confirm-first source config writes
-through `careerrat companies` or the DB/source-config owners approve it.
+Company discovery runs through the `discover-companies` skill. It finds
+candidate employers, and the agent resolves, validates and dedupes them before
+anything is written. Bounded AI may supply company seed judgment only
+(`src/core/discovery/company-seeds.mjs`); seed output is advisory until
+deterministic validation and resolver/scanner/gate checks approve it.
 
-Local proposal errors do not silently start chat or the full skill runtime; they
-surface locally with manual input, retry, or no-AI fallback paths. Visible agent
-sessions in the terminal workspace are explicit user-selected handoffs. The
-allowlisted full skill runtime (`src/core/ai/skill-runtime.mjs`) remains for
-tool-heavy, long-running, or human-watched workflows, not the default path for
-proposal creation, proposal decisions, deterministic validation, dedupe, or
-confirmed writes.
+`careerrat companies` is only the tracked-company source-config helper. It lists
+(default), adds (`--add "<name>" --url "<url>"`, dry-run unless `--write`) and
+removes (`--remove "<name>"`) entries, in SQLite for DB workspaces and
+`config/sourced-scan.json` otherwise. It does not create or decide candidate
+lists. Run it only as the confirm-first write step of `discover-companies`.
+
+Errors surface locally with manual input, retry, or no-AI fallback paths rather
+than silently starting chat. Visible agent sessions in the terminal workspace
+are explicit user-selected handoffs. The allowlisted full skill runtime
+(`src/core/ai/skill-runtime.mjs`) remains for tool-heavy, long-running, or
+human-watched workflows.
 
 ## Keeping Current
 
