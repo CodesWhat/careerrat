@@ -1,5 +1,9 @@
 # Code signing policy
 
+> **Note:** the desktop app was retired in v0.26.0, and no signed desktop
+> artifacts ship. CareerRat now ships through npm only. This file is kept as
+> the record of the signing policy.
+
 ## Status
 
 Windows code signing is planned and pending approval by SignPath Foundation.
