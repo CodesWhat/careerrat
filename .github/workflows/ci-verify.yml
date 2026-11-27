@@ -253,7 +253,7 @@ jobs:
           # product code and fixtures the Playwright tests reach. Other apps,
           # docs, markdown, other workflows and unit tests outside the
           # Playwright set cannot reach them.
-          ignorable='^(apps/(website|docs|desktop)|docs|examples|\.github)/|\.md$|^LICENSE$|^tests/'
+          ignorable='^(apps/(website|docs)|docs|examples|\.github)/|\.md$|^LICENSE$|^tests/'
           web=false
           if grep -Eq "$shared" <<<"$files"; then web=true
           elif grep -Evq "$ignorable" <<<"$files"; then web=true

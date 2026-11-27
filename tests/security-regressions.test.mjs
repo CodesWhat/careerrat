@@ -5,7 +5,6 @@ import JSZip from "jszip";
 import mammoth from "mammoth";
 import { plainTextFromHtml } from "../src/core/deep-ingest/source-normalize.mjs";
 import { extractPublicCareersPage } from "../src/core/discovery/public-page-extractor.mjs";
-import { compileSingleStarGlob } from "../src/core/fs/single-star-glob.mjs";
 import { extractDocxResumeMarkdown } from "../src/core/onboarding/resume-docx.mjs";
 import { trimEdgeCharacter } from "../src/core/text/slug.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
@@ -59,13 +58,6 @@ test("DOCX HTML fallback decodes entities once and omits active-content bodies",
     mammoth.convertToMarkdown = convertToMarkdown;
     mammoth.convertToHtml = convertToHtml;
   }
-});
-
-test("single-star desktop globs escape every regular-expression metacharacter", () => {
-  const pattern = compileSingleStarGlob("config/*.schema[.]\\json");
-
-  assert.equal(pattern.test("config/example.schema[.]\\json"), true);
-  assert.equal(pattern.test("config/exampleXschema[.]\\json"), false);
 });
 
 test("HTTP route dispatch invokes only callable handlers through a fixed method", () => {

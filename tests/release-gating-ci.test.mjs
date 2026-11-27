@@ -2084,7 +2084,7 @@ test("[codex-305-r11] the @npmcli/config devDependency is pinned to the exact ve
 // Corepack cache. Spawns a fresh node process, with $COREPACK_HOME pointed
 // at a brand-new empty directory, that requires the exact module this file
 // loads its option/shorthand tables from — the same failure mode the
-// macOS desktop-release job hit (bundled `npm ci` then `release:pretag`,
+// retired macOS release job hit (bundled `npm ci` then `release:pretag`,
 // with Corepack never invoked) is reproduced directly here instead of only
 // being asserted about.
 //
@@ -2483,17 +2483,11 @@ test("fixture: a workspace postinstall that resolves and runs a scriptless depen
 });
 
 test("paid native AI certification is separate from deterministic release gates", async () => {
-  const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
+  const [rootPackage, rootVerify] = await Promise.all([
     source("package.json"),
     source("scripts/verify-live-search-receipts.mjs"),
-    source("apps/desktop/scripts/verify-release.mjs"),
-    source(".github/workflows/desktop-release.yml"),
   ]);
   const pkg = JSON.parse(rootPackage);
-  const macReleaseJob = desktopWorkflow.slice(
-    desktopWorkflow.indexOf("  build-notarize-upload:"),
-    desktopWorkflow.indexOf("  build-windows-upload:")
-  );
   assert.equal(
     pkg.scripts?.["release:pretag"],
     "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs"
@@ -2504,16 +2498,20 @@ test("paid native AI certification is separate from deterministic release gates"
   );
   assert.doesNotMatch(rootVerify, /releaseVersion|EXCEPTION/);
   assert.match(rootVerify, /PASS native AI search certification evidence/);
-  assert.doesNotMatch(desktopVerify, /live-search|Live-search|verifyLiveSearchReceiptDirectory/);
-  assert.doesNotMatch(desktopWorkflow, /Verify current native AI search receipts/);
-  assert.match(desktopWorkflow, /Verify deterministic release metadata/);
-  assert.match(desktopWorkflow, /npm run release:pretag/);
-  assert.doesNotMatch(
-    desktopWorkflow,
-    /LIVE_SEARCH_(?:SKIP|BYPASS|EXCEPTION)|skip-live-search|bypass-live-search/i
-  );
-  assert.doesNotMatch(macReleaseJob, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
-  assert.match(macReleaseJob, /fetch-depth:\s*0/);
+});
+
+test("release docs keep paid native-runtime certification off the release blocker", async () => {
+  const release = await source("docs/RELEASE.md");
+
+  for (const pattern of [
+    /separate product-certification[\s\S]{0,120}not a tag or packaged-release prerequisite/i,
+    /Open-web result mix[\s\S]{0,120}external state/i,
+    /native runtime adapters[\s\S]{0,240}scheduled\s+certification cadence/i,
+    /source-checkout command fails[\s\S]{0,80}missing or stale/i,
+    /protected unit, integration, browser, and build\s+matrix/i,
+  ]) {
+    assert.match(release, pattern, `docs/RELEASE.md should match ${pattern}`);
+  }
 });
 
 // CR74: a job stuck in a harden-runner or post-step (cache save, checkout

@@ -98,7 +98,7 @@ build; switch with `npm i -g careerrat`.
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 | Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Release process | [`docs/RELEASE.md`](docs/RELEASE.md) |
-| Windows status | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
+| Windows install | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
 | Contributing convention | [`AGENTS.md`](AGENTS.md) |
 | Security policy | [`.github/SECURITY.md`](.github/SECURITY.md) |
 | Issues | [GitHub Issues](https://github.com/CodesWhat/careerrat/issues) |
@@ -208,10 +208,8 @@ you keep working:
 <details>
 <summary>Windows</summary>
 
-The Windows x64 installer passed build, install, launch, export, and uninstall
-QA. A public Windows installer will ship only after SignPath Foundation signing
-is available; SignPath requires project reputation CareerRat does not yet have.
-See [Windows status](docs/WINDOWS.md).
+Windows installs from npm like every other platform. There is no Windows
+installer. See [Windows: install from npm](docs/WINDOWS.md).
 
 There is no mobile app and no Intel Mac build.
 
@@ -359,7 +357,7 @@ Your workspace stays on your machine and can be exported.
   local app does not load that website analytics client.
 
 Read the full [privacy documentation](https://careerrat.com/docs/advanced/privacy),
-[data contract](docs/DATA_CONTRACT.md), and [Code signing policy](docs/CODE_SIGNING_POLICY.md).
+and [data contract](docs/DATA_CONTRACT.md).
 
 </details>
 

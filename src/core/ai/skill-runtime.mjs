@@ -227,8 +227,7 @@ export function buildChildEnv({
   if (model) shared.ANTHROPIC_MODEL = model;
   if (smallFastModel) shared.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
 
-  // ELECTRON_RUN_AS_NODE: no-op under plain node. Under an Electron host (see
-  // apps/desktop/main.mjs) this SDK query() spawns its own CLI child (and
+  // ELECTRON_RUN_AS_NODE: no-op under plain node. Under an Electron host this SDK query() spawns its own CLI child (and
   // that child can spawn further descendants) — process.execPath is the
   // Electron binary, so the child needs an explicit Node runtime. Checked the installed
   // @anthropic-ai/claude-agent-sdk@0.3.233's sdk.d.ts/sdk.mjs rather than

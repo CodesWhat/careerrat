@@ -42,7 +42,6 @@ const APP_DEFAULT_FILES = [
   "src/cli/packet-route.mjs",
   "src/cli/search-route.mjs",
   "src/cli/sourcing-route.mjs",
-  "apps/desktop/main.mjs",
 ];
 
 const MIXED_ROUTE_SLICES = [

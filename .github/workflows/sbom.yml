@@ -18,8 +18,8 @@ name: sbom
 # without npm's strict validation and produces the same SPDX format.
 #
 # workflow_dispatch takes no inputs on purpose: checkov CKV_GHA_7 requires
-# them to be empty, matching release.yml and desktop-release.yml's
-# dispatch triggers. A tag-pinned dispatch targets that exact release; a
+# them to be empty, matching release.yml's
+# dispatch trigger. A tag-pinned dispatch targets that exact release; a
 # manual branch dispatch targets the latest published release, resolved by
 # listing `repos/{repo}/releases` and filtering, never
 # `gh release view <tag>` (drafts aren't addressable by tag, and gh's
@@ -63,7 +63,7 @@ jobs:
         with:
           egress-policy: block
           # This job only calls `gh api repos/.../releases`, the same
-          # resolve-release pattern as desktop-release.yml's resolve-tag job.
+          # resolve-release pattern as release.yml's resolve-tag job.
           # No insights run exists yet (this workflow has never executed);
           # derived from the step's only network call.
           allowed-endpoints: >
@@ -120,7 +120,7 @@ jobs:
     permissions:
       contents: write # attach the generated SBOM to the resolved release
     # GH_TOKEN is scoped to the one step that talks to GitHub, not the job:
-    # the same house lesson desktop-release.yml records for its build job.
+    # the same house lesson release.yml follows.
     env:
       TAG: ${{ needs.resolve-release.outputs.tag }}
       VERSION: ${{ needs.resolve-release.outputs.version }}
