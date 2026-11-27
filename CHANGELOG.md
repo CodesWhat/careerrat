@@ -25,6 +25,9 @@ All notable changes to CareerRat are documented here. This project follows
 - A failure while the terminal workspace closes the previous person's session no longer leaves the screen locked. Every switch now ends on one signal, with an error notice if cleanup failed, and the screen also unlocks if the request can't be sent or the connection closes mid-switch.
 - Switching person in the terminal workspace now resets the status, currency, pay basis and sort controls, then fills all four from the new person's workspace, so the previous person's filters no longer linger.
 
+- Employer job sitemap source: a posting the site's robots.txt disallows is no longer opened later in the scan, either to fill in its description or to check it's still live, and those later fetches no longer follow redirects. Those postings stay as partial rows.
+- Employer job sitemap source: a sitemap with a very large number of unclosed entries, or a robots.txt with expensive wildcard rules, can no longer stall a scan. A stalled DNS lookup for robots.txt now times out and respects Stop, a partial (HTTP 206) robots.txt counts as unreadable, and an escaped `%2A` or `%24` in a rule is matched as a literal character instead of a wildcard or end anchor.
+
 ## [0.26.0] - 2026-11-27
 
 ### Added

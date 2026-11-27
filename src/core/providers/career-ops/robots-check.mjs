@@ -17,7 +17,11 @@
  *     Disallow (Google resolves ties to Allow; this does not);
  *   - `*` matches any run of characters and a trailing `$` anchors the end;
  *     a `$` anywhere else is literal;
- *   - patterns and the request path are both percent-decoded before matching;
+ *   - patterns and the request path are both percent-decoded before matching,
+ *     but a `*` or `$` that arrives escaped (`%2A`, `%24`) stays a literal
+ *     character: only a raw one is a wildcard or anchor (RFC 9309 2.2.3);
+ *   - matching work is bounded per check; a robots.txt that would exceed the
+ *     budget denies the path rather than stalling the scan;
  *   - blank lines inside a record do not end it, and one leading UTF-8 byte
  *     order mark is skipped (both fail open in Python's robotparser).
  *
@@ -249,6 +253,46 @@ function parseRobotsGroups(text) {
   return groups;
 }
 
+/** Work units (pattern cells visited) one robotsAllows check may spend across all rules. */
+const ROBOTS_MATCH_BUDGET = 4_000_000;
+
+/** Thrown by matchLength when a check's work budget runs out. */
+class RobotsBudgetExceeded extends Error {
+  constructor() {
+    super("robots.txt matching exceeded its work budget");
+    this.code = "robots_budget_exceeded";
+  }
+}
+
+const STAR = Symbol("robots-wildcard");
+
+/**
+ * The rule as match units: one entry per character, STAR for a raw `*`.
+ * Wildcards and the `$` anchor are decided on the raw text, then each literal
+ * run is percent-decoded, so `%2A` and `%24` stay literal characters.
+ *
+ * @param {string} rawPattern
+ * @returns {{ units: (string|symbol)[], endAnchor: boolean, length: number }}
+ */
+function compilePattern(rawPattern) {
+  const endAnchor = rawPattern.endsWith("$");
+  const body = endAnchor ? rawPattern.slice(0, -1) : rawPattern;
+  const units = [];
+  let length = endAnchor ? 1 : 0;
+  const segments = body.split("*");
+  segments.forEach((segment, index) => {
+    if (index > 0) {
+      length += 1;
+      // Consecutive `*` match as one.
+      if (units.at(-1) !== STAR) units.push(STAR);
+    }
+    const decoded = percentDecode(segment);
+    length += decoded.length;
+    for (const ch of decoded) units.push(ch);
+  });
+  return { units, endAnchor, length };
+}
+
 /**
  * RFC 9309 wildcard match. Returns the match length (the pattern's length,
  * which is what "longest match" compares) or -1.
@@ -257,35 +301,46 @@ function parseRobotsGroups(text) {
  * `*` into `.*` lets a non-matching rule with repeated wildcard segments
  * (`/*a*a*a...*b$`) send a backtracking engine into exponential time, on a
  * file the site controls (GHSA-xhqf-8q8x-4jwm upstream). Consecutive `*`
- * match as one.
+ * match as one. A rule with no wildcard skips the table and compares
+ * directly. Every unit of work is charged to `budget` (shared by all rules in
+ * one check); when it runs out this throws RobotsBudgetExceeded.
  *
  * @param {string} rawPattern - The rule value as written.
  * @param {string} path - The percent-decoded request path (plus `?query`).
+ * @param {{ remaining: number }} [budget]
  * @returns {number}
  */
-export function matchLength(rawPattern, path) {
+export function matchLength(rawPattern, path, budget = { remaining: ROBOTS_MATCH_BUDGET }) {
   if (rawPattern === "") return -1;
-  const pattern = percentDecode(rawPattern);
-  const endAnchor = pattern.endsWith("$");
-  const pat = Array.from((endAnchor ? pattern.slice(0, -1) : pattern).replace(/\*{2,}/g, "*"));
+  const { units: pat, endAnchor, length } = compilePattern(rawPattern);
+  const charge = (n) => {
+    budget.remaining -= n;
+    if (budget.remaining < 0) throw new RobotsBudgetExceeded();
+  };
+  charge(pat.length + 1);
+  if (!pat.includes(STAR)) {
+    const literal = pat.join("");
+    return (endAnchor ? path === literal : path.startsWith(literal)) ? length : -1;
+  }
   const chars = Array.from(path);
   // reach[j]: the first j pattern characters match the path consumed so far.
   let reach = new Array(pat.length + 1).fill(false);
   reach[0] = true;
-  for (let j = 1; j <= pat.length && pat[j - 1] === "*"; j++) reach[j] = true;
-  if (reach[pat.length] && !endAnchor) return pattern.length;
+  for (let j = 1; j <= pat.length && pat[j - 1] === STAR; j++) reach[j] = true;
+  if (reach[pat.length] && !endAnchor) return length;
   for (const ch of chars) {
+    charge(pat.length + 1);
     const step = new Array(pat.length + 1).fill(false);
     for (let j = 1; j <= pat.length; j++) {
       const c = pat[j - 1];
-      if (c === "*") step[j] = step[j - 1] || reach[j];
+      if (c === STAR) step[j] = step[j - 1] || reach[j];
       else if (c === ch) step[j] = reach[j - 1];
     }
     reach = step;
     // Without `$`, matching a prefix of the path is enough.
-    if (reach[pat.length] && !endAnchor) return pattern.length;
+    if (reach[pat.length] && !endAnchor) return length;
   }
-  return reach[pat.length] ? pattern.length : -1;
+  return reach[pat.length] ? length : -1;
 }
 
 /**
@@ -306,8 +361,16 @@ export function isPathAllowed(text, agent, path) {
   const rules = own?.length ? own : (groups.get("*") ?? []);
   let bestLength = -1;
   let bestAllow = true;
+  const budget = { remaining: ROBOTS_MATCH_BUDGET };
   for (const { allow, pattern } of rules) {
-    const n = matchLength(pattern, path);
+    let n;
+    try {
+      n = matchLength(pattern, path, budget);
+    } catch (err) {
+      // Out of budget: the rules cannot be read in bounded time, so deny.
+      if (err instanceof RobotsBudgetExceeded) return false;
+      throw err;
+    }
     if (n > bestLength || (n === bestLength && n >= 0 && !allow)) {
       bestLength = n;
       bestAllow = allow;
@@ -498,6 +561,7 @@ async function guardHost(hostname, resolver) {
 
 function classifyFetchError(err, timeoutMs) {
   const code = err?.code ?? err?.cause?.code;
+  if (err?.aborted) return deny("robots_aborted", "check was aborted");
   if (err?.timedOut || err?.name === "TimeoutError" || err?.name === "AbortError") {
     return deny("robots_timeout", `fetch timed out after ${timeoutMs}ms`);
   }
@@ -510,10 +574,14 @@ function classifyFetchError(err, timeoutMs) {
   return deny("robots_fetch_error", `fetch failed (${String(err?.message ?? err).split("\n")[0]})`);
 }
 
-/** Race a promise against the timeout, so a transport that ignores its signal still ends. */
-function withTimeout(run, timeoutMs) {
+/**
+ * Race a promise against the timeout and the caller's abort signal, so a
+ * transport or resolver that ignores its signal still ends.
+ */
+function withTimeout(run, timeoutMs, outerSignal) {
   const controller = new AbortController();
   let timer;
+  let onOuterAbort;
   const expired = new Promise((_, reject) => {
     timer = setTimeout(() => {
       controller.abort();
@@ -521,15 +589,31 @@ function withTimeout(run, timeoutMs) {
       err.timedOut = true;
       reject(err);
     }, timeoutMs);
+    if (outerSignal) {
+      onOuterAbort = () => {
+        controller.abort();
+        const err = new Error("robots.txt check aborted");
+        err.aborted = true;
+        reject(err);
+      };
+      if (outerSignal.aborted) onOuterAbort();
+      else outerSignal.addEventListener("abort", onOuterAbort, { once: true });
+    }
   });
-  return Promise.race([run(controller.signal), expired]).finally(() => clearTimeout(timer));
+  return Promise.race([run(controller.signal), expired]).finally(() => {
+    clearTimeout(timer);
+    if (outerSignal && onOuterAbort) outerSignal.removeEventListener("abort", onOuterAbort);
+  });
 }
 
 /**
  * Fetch one origin's robots.txt and reduce it to a policy: either the body to
  * match paths against, or a verdict that holds for every path on the origin.
  */
-async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects }) {
+async function loadPolicy(
+  origin,
+  { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects, signal: outerSignal }
+) {
   let target = `${origin}/robots.txt`;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const parsed = new URL(target);
@@ -539,30 +623,38 @@ async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, m
         `redirected to unsupported protocol ${parsed.protocol}`
       );
     }
-    const guarded = await guardHost(parsed.hostname, resolver);
-    if (guarded) return guarded;
-
     let status;
     let location;
     let body;
+    let blocked = null;
     try {
-      ({ status, location, body } = await withTimeout(async (signal) => {
-        const res = await fetchImpl(target, {
-          headers: { "user-agent": userAgent, accept: "text/plain,*/*" },
-          redirect: "manual",
-          signal,
-          timeoutMs,
-          maxBytes: ROBOTS_MAX_BYTES,
-        });
-        const s = Number(res?.status ?? 0);
-        const loc = typeof res?.headers?.get === "function" ? res.headers.get("location") : null;
-        // Only a 2xx body is read; it is the only one that decides anything.
-        const text = s >= 200 && s < 300 && typeof res?.text === "function" ? await res.text() : "";
-        return { status: s, location: loc, body: text };
-      }, timeoutMs));
+      // The DNS preflight and the request share one deadline (and the scan's
+      // abort signal), so a stalled lookup cannot leave the policy pending.
+      ({ status, location, body, blocked } = await withTimeout(
+        async (signal) => {
+          const refused = await guardHost(parsed.hostname, resolver);
+          if (refused) return { blocked: refused };
+          const res = await fetchImpl(target, {
+            headers: { "user-agent": userAgent, accept: "text/plain,*/*" },
+            redirect: "manual",
+            signal,
+            timeoutMs,
+            maxBytes: ROBOTS_MAX_BYTES,
+          });
+          const s = Number(res?.status ?? 0);
+          const loc = typeof res?.headers?.get === "function" ? res.headers.get("location") : null;
+          // Only a 2xx body is read; it is the only one that decides anything.
+          const text =
+            s >= 200 && s < 300 && typeof res?.text === "function" ? await res.text() : "";
+          return { status: s, location: loc, body: text };
+        },
+        timeoutMs,
+        outerSignal
+      ));
     } catch (err) {
       return classifyFetchError(err, timeoutMs);
     }
+    if (blocked) return blocked;
 
     if (status >= 300 && status < 400) {
       if (!location) return deny("robots_http_error", `answered HTTP ${status} with no Location`);
@@ -578,6 +670,8 @@ async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, m
     if (status === 401 || status === 403)
       return deny("robots_forbidden", `refused with HTTP ${status}`);
     if (status >= 500) return deny("robots_server_error", `answered HTTP ${status}`);
+    if (status === 206)
+      return deny("robots_partial_content", "answered HTTP 206, a partial robots.txt");
     if (status < 200 || status >= 300) return deny("robots_http_error", `answered HTTP ${status}`);
 
     if (Buffer.byteLength(body, "utf8") > ROBOTS_MAX_BYTES) {
@@ -622,6 +716,8 @@ export function clearRobotsCache() {
  * @param {string} [opts.userAgent] - Sent on the robots.txt request.
  * @param {string} [opts.productToken] - The robots.txt group to obey.
  * @param {number} [opts.maxRedirects]
+ * @param {AbortSignal} [opts.signal] - The caller's abort signal; it bounds the
+ *   DNS preflight and the request. An aborted check is not cached.
  * @returns {Promise<{allowed: boolean, code: string, reason: string, crawlDelay?: number|null}>}
  *   `reason` reads after "robots.txt ", e.g. "answered HTTP 503". When a
  *   published robots.txt permits the path, `crawlDelay` is the Crawl-delay it
@@ -636,6 +732,7 @@ export async function robotsAllows(url, opts = {}) {
     userAgent = DEFAULT_USER_AGENT,
     productToken = ROBOTS_PRODUCT_TOKEN,
     maxRedirects = ROBOTS_MAX_REDIRECTS,
+    signal,
   } = opts;
 
   let parsed;
@@ -655,10 +752,22 @@ export async function robotsAllows(url, opts = {}) {
   const origin = parsed.origin;
   let pending = cache.get(origin);
   if (!pending) {
-    pending = loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects }).catch(
-      (err) =>
+    pending = loadPolicy(origin, {
+      fetchImpl,
+      resolver,
+      timeoutMs,
+      userAgent,
+      maxRedirects,
+      signal,
+    })
+      .catch((err) =>
         deny("robots_fetch_error", `check failed (${String(err?.message ?? err).split("\n")[0]})`)
-    );
+      )
+      .then((result) => {
+        // One scan's abort says nothing about the host: do not cache it.
+        if (result.code === "robots_aborted" && cache.get(origin) === pending) cache.delete(origin);
+        return result;
+      });
     cache.set(origin, pending);
   }
   const policy = await pending;
