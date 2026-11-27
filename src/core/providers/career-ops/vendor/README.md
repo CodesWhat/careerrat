@@ -219,3 +219,7 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
 - `workday.mjs`: `stripRepostSuffixKeepCase` strips a one-digit `-N` suffix only
   (upstream allows two). `JR2024-12` and `JR2024-13` are different requisitions
   and must keep distinct identities.
+- `career-ops-registry.mjs` copies a stored `--query` into `gupy`, `jobscz`,
+  `platsbanken` and `pracecz` keyword config (as it already did for
+  `arbeitsagentur`, `vdab`, `jobbankca` and `mycareersfuture`) when the entry's
+  own block sets no keywords. An explicit `keywords` list, or gupy's `q`, wins.
