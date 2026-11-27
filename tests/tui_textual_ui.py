@@ -244,8 +244,55 @@ closeAll();
         self.assertTrue(app.switching, "still locked after the person event")
         self.assertFalse(app.check_action("add_context", ()))
         await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        self.assertTrue(app.switching, "the snapshot alone does not unlock")
+        self.assertFalse(app.check_action("add_context", ()))
+        await app.handle_event({"type": "switch-complete"})
         self.assertFalse(app.switching)
         self.assertEqual([c[0] for c in calls], ["person", "workspace"])
+
+    async def test_a_person_event_clears_the_rendered_workspace_even_when_the_snapshot_is_skipped(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-stale-") as folder:
+            base = Path(folder)
+            (base / "workspace").mkdir(parents=True)
+            (base / "workspace/tracker.json").write_text(
+                json.dumps(
+                    {
+                        "applications": [
+                            {
+                                "id": "ownerco",
+                                "company": "OwnerCo",
+                                "role": "Lead",
+                                "status": "applied",
+                            }
+                        ]
+                    }
+                )
+            )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 1)
+                # The destination's snapshot is skipped: only person, then switch-complete.
+                await app.handle_event({"type": "person", "person": "ada", "generation": 5})
+                self.assertTrue(app.switching)
+                self.assertEqual(table.row_count, 0, "stale rows are gone")
+                self.assertIsNone(app.selected_id)
+                self.assertEqual(app.rendered_ids, [])
+                inspector_text = " ".join(
+                    str(w.renderable)
+                    for w in app.query("#inspector Static")
+                    if hasattr(w, "renderable")
+                )
+                self.assertNotIn("OwnerCo", inspector_text)
+                self.assertFalse(app.check_action("add_context", ()))
+                await app.handle_event({"type": "switch-complete"})
+                self.assertFalse(app.switching)
+                self.assertEqual(table.row_count, 0)
+                await pilot.press("ctrl+q")
 
     async def test_switch_complete_unlocks_when_the_snapshot_was_skipped(self):
         app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])

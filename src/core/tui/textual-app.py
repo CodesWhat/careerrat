@@ -1421,9 +1421,9 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
-            if self.awaiting_snapshot:
-                self.awaiting_snapshot = False
-                self.switching = False
+            # The switch stays locked until switch-complete, whether or not
+            # this snapshot was the one the switch was waiting on.
+            self.awaiting_snapshot = False
         elif kind == "people":
             self.push_screen(
                 PersonPicker(value["people"], value.get("current")),
@@ -1560,10 +1560,32 @@ class CareerRatApp(App):
         self.job_ids = []
         self.job_cells = []
         self.query_one("#request", Input).value = ""
+        self.clear_rendered_workspace()
         self.show_person(person)
         self.write_terminal(f"\x1b]2;CareerRat{' · ' + person if person else ''}\x07")
         self.query_one(NativePane).clear_frame()
         self.call_after_refresh(self.resize_agent)
+
+    def clear_rendered_workspace(self):
+        """Empty the jobs table and inspector, so nothing from the last workspace stays clickable."""
+        table = self.query_one("#jobs", DataTable)
+        self.updating = True
+        try:
+            table.clear()
+        finally:
+            self.updating = False
+        self.rendered_ids = []
+        self.rendered_rows = []
+        table.border_title = "Saved jobs"
+        self.update_details(None)
+        self.set_text("workspace-history-text", "Switching workspace…", empty=True)
+        for slot in range(RUN_SLOTS):
+            self.query_one(f"#run-{slot}").display = False
+        self.query_one("#activity-empty").display = True
+        self.query_one("#change-controls").display = False
+        self.query_one("#changes-position", Static).display = False
+        self.query_one("#changes-text", Static).display = False
+        self.query_one("#changes-empty").display = True
 
     def ring_bell(self):
         """The agent rang the bell: pass it to the outer terminal, at most once a second."""

@@ -619,14 +619,7 @@ function isNonPublicIp(value) {
     // reuse the IPv4 logic below on it.
     const embedded = embeddedIpv4(host);
     if (embedded) return isNonPublicIp(embedded);
-    return (
-      host === "::" ||
-      host === "::1" ||
-      host.startsWith("fc") ||
-      host.startsWith("fd") ||
-      /^fe[89ab]/.test(host) ||
-      host.startsWith("2001:db8:")
-    );
+    return isNonGlobalIpv6(host);
   }
 
   const [a, b, c] = host.split(".").map((part) => Number.parseInt(part, 10));
@@ -644,6 +637,31 @@ function isNonPublicIp(value) {
     (a === 198 && b === 51 && c === 100) ||
     (a === 203 && b === 0 && c === 113) ||
     a >= 224
+  );
+}
+
+// IPv6 ranges from the IANA special-purpose registry that are not globally
+// reachable (or are reserved for local/transition use). Anything that embeds an
+// IPv4 (mapped, NAT64 well-known, 6to4) was already decoded by the caller.
+// 2001::/23 is blocked whole: its globally reachable carve-outs are anycast
+// service prefixes, not places this fetcher should ever go.
+function isNonGlobalIpv6(host) {
+  const g = ipv6ToGroups(host);
+  if (!g) return true;
+  const first = g[0];
+  const isZero = (from, to) => g.slice(from, to).every((x) => x === 0);
+  return (
+    (isZero(0, 7) && g[7] <= 1) || // :: and ::1
+    (first & 0xfe00) === 0xfc00 || // fc00::/7 unique local
+    (first & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+    (first & 0xffc0) === 0xfec0 || // fec0::/10 deprecated site-local
+    (first & 0xff00) === 0xff00 || // ff00::/8 multicast
+    (first === 0x64 && g[1] === 0xff9b && g[2] === 1) || // 64:ff9b:1::/48 local-use NAT64
+    (first === 0x100 && isZero(1, 4)) || // 100::/64 discard-only
+    (first === 0x2001 && g[1] < 0x200) || // 2001::/23 protocol assignments, Teredo, benchmarking
+    (first === 0x2001 && g[1] === 0xdb8) || // 2001:db8::/32 documentation
+    (first === 0x3fff && g[1] < 0x1000) || // 3fff::/20 documentation
+    first === 0x5f00 // 5f00::/16 SRv6 SIDs
   );
 }
 
