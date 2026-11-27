@@ -9,6 +9,7 @@ All notable changes to CareerRat are documented here. This project follows
 ### Added
 
 - The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
+- New job sources: Bizneo, Computrabajo, Goldman Sachs, Google (first results page), HireHive, ITjobs, Magneto365, NEOGOV, OCC, Paycom and SchoolSpring. A board that is cut short is reported as partial.
 - New job sources: Aldi Nord, Apple, BWI, Bulldogjob, Deel, Bolt, Dover, Paylocity, Polymer, RedRover, Notion careers pages and JazzHR. Each reads a public careers board.
 - New job sources: Atlassian, Factorial, HiringRoom, Generalist World, GermanTechJobs, Startup Jobs, the Python.org job board, Prevue APS, HiBob, InHire, Remote.com and AppliTrack. Each reads a public careers board.
 
