@@ -301,6 +301,8 @@ async function request(
       error.body = responseText;
       error.retryAfter = response.headers?.get?.("retry-after") || null;
       error.location = response.headers?.get?.("location") || null;
+      const cfMitigated = response.headers?.get?.("cf-mitigated");
+      if (cfMitigated) error.cfMitigated = cfMitigated;
       throw error;
     }
     return await consume(response);

@@ -1,7 +1,18 @@
 # Career Ops provider conformance snapshot
 
 These provider contract tests come from `career-ops-hq/career-ops` commit
-`8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40` under its MIT license.
+`13786939dc79e0ec324b5571c9e6f29c50d43b53` under its MIT license. The provider
+fixtures below are still adapted from the earlier `8a20e491` snapshot until the
+CR70 slices that re-adapt them land.
+
+CR70 slice 0 (2026-11-27) added `helpers/`: upstream's suites for the shared
+helpers that have no provider id (`_html-to-text`, `_html-entities`,
+`_cached-lookup`, `_country`, `_employment-type`, `_safe-url`), adapted the
+same way and run by `tests/career-ops-helpers.test.mjs`. The `_html-to-text`
+fixture passes `{ cap: DESCRIPTION_CAP }` where upstream relies on the default,
+because CareerRat bounds a bare `htmlToText()` by `DESCRIPTION_MAX_BYTES`.
+Skipped, with the helpers they cover not vendored: `_http*`, `_dns-*`,
+`_ip-guard` and the other shared-behavior suites named in the CR70 plan.
 
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two

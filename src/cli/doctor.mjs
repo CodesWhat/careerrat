@@ -42,7 +42,7 @@ import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { targetingAdjacencyGaps } from "../core/profile/targeting-adjacency.mjs";
-import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
+import { CAREER_OPS_PUBLIC_PROVIDER_IDS } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import {
   inferProvider,
@@ -67,9 +67,9 @@ const json = args.includes("--json");
 // never depends on installedRuntimes/runtimeSelection below. The CLI's own
 // `careerrat doctor` never passes this — only guidance-snapshot callers do.
 const guidanceOnly = args.includes("--guidance-only");
-// Matches companies.mjs's PUBLIC_PROVIDER_COUNT: excludes local-parser, the
-// one adopted id that is not a public network source adapter.
-const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
+// Matches companies.mjs's PUBLIC_PROVIDER_COUNT: only adopted ids that are
+// public network source adapters (not local-parser, not a deferred upstream id).
+const PUBLIC_PROVIDER_COUNT = CAREER_OPS_PUBLIC_PROVIDER_IDS.length;
 // One small, stable public JSON endpoint for `doctor --network`. It goes through
 // the same fetch every source scan uses, so a pass here means scans can reach out.
 const NETWORK_PROBE_URL = "https://boards-api.greenhouse.io/v1/boards/cloudflare";

@@ -12,6 +12,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Changed
 
+- Career Ops provider snapshot: the pin moves to upstream `13786939` and the shared helpers the new job-board sources need are in place (board truncation, posting close dates, HTML and entity text, salary, country and employment-type parsing). No new source is turned on yet, and the 70 upstream sources still to come are tracked as pending in the parity manifest.
+- The `doctor` company-board hint counts the public adapters CareerRat actually ships instead of the upstream total.
 - The sitemap no longer lists the old dashboard stub, and the stub is marked noindex.
 - CI: every ci-verify and security-actions job now has a timeout, so a job that hangs in a harden-runner or post-step fails in minutes instead of running to the 6-hour default.
 - The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.

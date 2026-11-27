@@ -20,6 +20,7 @@
       ],
       "ignore": [
         "src/core/providers/career-ops/vendor/**",
+        "src/core/providers/career-ops/lib/**",
         "tests/fixtures/career-ops/**",
         "tests/fixtures/db-concurrency-worker.mjs"
       ]
