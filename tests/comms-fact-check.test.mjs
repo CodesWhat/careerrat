@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { deliverDraftToPerson } from "../src/core/comms/deliver-draft.mjs";
 import { checkDraftFacts, isCandidateClaim } from "../src/core/comms/draft-facts.mjs";
 import { closeAll, openDb, requireDb } from "../src/core/db/connection.mjs";
@@ -169,22 +168,27 @@ test("commSetDraft refuses an invented-fact draft at the storage point", (t) => 
   );
 });
 
-test("compose-link handoff and send refuse a draft stored before the check existed", async (t) => {
-  const { env } = fixture(t, INVENTED, {}, { legacy: true });
-  for (const type of ["communication.handoff", "communication.send"]) {
-    await assert.rejects(
-      executeWorkspaceIntent({
-        repoRoot: REPO_ROOT,
-        env,
-        intent: { type, entity: { type: "communication", id: "comm-rae" } },
-        sendCommunicationImpl: async () => {
-          throw new Error("must not send");
+test("delivery refuses a draft stored before the check existed", async (t) => {
+  const { env, base } = fixture(t, INVENTED, {}, { legacy: true });
+  await assert.rejects(
+    deliverDraftToPerson({
+      repoRoot: REPO_ROOT,
+      env,
+      base,
+      name: "david",
+      id: "comm-rae",
+      now: NOON,
+      transportOverride: {
+        transport: {
+          name: "fake",
+          send: async () => {
+            throw new Error("must not send");
+          },
         },
-      }),
-      (error) => error.code === "COMMUNICATION_DRAFT_FACTS",
-      type
-    );
-  }
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_DRAFT_FACTS"
+  );
 });
 
 test("availability replies with days, times, dates and durations pass; metrics still fail", (t) => {

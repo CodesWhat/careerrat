@@ -151,7 +151,7 @@ export function normalizeAutomationConfig(stored) {
 // newly-added capability (or a doc that predates one) reads on instead of
 // `undefined`. Used by the CLI's DB-mode edit path (src/cli/automation.mjs), the
 // DB patch path, and the settings.explain/settings.apply Ask intents
-// (workspace-agent.mjs) so every surface computes the same "current value".
+// so every surface computes the same "current value".
 export function mergeAutomationDefaults(data) {
   return normalizeAutomationConfig(data);
 }

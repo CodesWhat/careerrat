@@ -2,25 +2,13 @@
 // the callers that must agree with it: exact tracking keys are stripped,
 // identifying params (referenceId=77 vs 78) never collapse.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { after, test } from "node:test";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { matchTrackerRecord } from "../src/core/intake/match.mjs";
+import { test } from "node:test";
 import { normalizePostingUrl } from "../src/core/scoring/posting-url.mjs";
 import { diffSnapshotOffers, offerIdentityKeys } from "../src/core/scoring/sourced-delta.mjs";
 import {
   identityKeysWithAliases,
   postingIdentityKeys,
 } from "../src/core/scoring/sourced-identity.mjs";
-
-const roots = [];
-after(() => {
-  closeAll();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
 const A = "https://careers.example.com/jobs/view?referenceId=77";
 const B = "https://careers.example.com/jobs/view?referenceId=78";
@@ -37,36 +25,6 @@ test("normalizePostingUrl keeps identifying params and strips exact tracking key
   }
   assert.equal(normalizePostingUrl("not a url "), "not a url");
   assert.equal(normalizePostingUrl(""), "");
-});
-
-test("intake match keeps referenceId=77 and 78 apart but matches tracking-only variants", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-posting-url-"));
-  roots.push(repoRoot);
-  const sourceDir = join(repoRoot, "fixture-source");
-  mkdirSync(sourceDir, { recursive: true });
-  writeFileSync(
-    join(sourceDir, "tracker.json"),
-    JSON.stringify({
-      meta: {},
-      applications: [
-        { id: "app-77", company: "Acme", role: "Engineer", status: "applied", link: A },
-      ],
-      sourced: [],
-      sources: [],
-      communications: [],
-    })
-  );
-  importFromTracker({ repoRoot, sourceDir });
-  const db = openDb({ repoRoot });
-  const other = matchTrackerRecord({ db, url: B, company: "Zed", role: "Other" });
-  assert.notEqual(other.confidence, "exact_url");
-  const same = matchTrackerRecord({
-    db,
-    url: `${A}&utm_source=news&gh_src=q`,
-    company: "Zed",
-    role: "Other",
-  });
-  assert.equal(same.confidence, "exact_url");
 });
 
 test("scanner identity and snapshot delta keep referenceId=77 and 78 as distinct postings", () => {

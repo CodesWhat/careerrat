@@ -4,10 +4,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
-import { workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { candidateConfigGet, jobThreadMessageAppend } from "../src/core/db/verbs.mjs";
+import { recordFitFloor } from "./helpers/recorded-fit-floor.mjs";
 
 const roots = [];
 const env = { ...process.env };
@@ -105,32 +104,21 @@ test("CLI workspace history is isolated by data root and no-database reads fail 
 
 test("CLI lists stored changes and undoes by reference, refusing stale and repeated undo", async () => {
   const repoRoot = root();
-  const change = async (value) => {
-    await executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "settings.apply",
-        entity: { type: "workspace", id: "workspace-main" },
-        input: { change: { kind: "profile", section: "fit-floor", value } },
-      },
-    });
-    return workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
-  };
-  const first = await change(70);
-  const second = await change(80);
+  const change = (value) => recordFitFloor({ repoRoot, env: {} }, value);
+  const first = change(70);
+  const second = change(80);
   const changes = cli(repoRoot, ["changes", "list"]);
   assert.equal(changes.changes.length, 2);
   assert.equal(changes.changes[0].messageId, second.id);
   assert.equal(changes.changes[0].at, second.createdAt);
   assert.equal(changes.changes[1].at, first.createdAt);
   assert.equal(changes.changes[0].entry.after, 80);
-  cli(repoRoot, ["changes", "undo", first.id, "1"], { ok: false });
+  cli(repoRoot, ["changes", "undo", first.id, "0"], { ok: false });
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 80);
-  cli(repoRoot, ["changes", "undo", second.id, "1"]);
+  cli(repoRoot, ["changes", "undo", second.id, "0"]);
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
   assert.equal(cli(repoRoot, ["changes", "list"]).changes[0].reverted, true);
-  cli(repoRoot, ["changes", "undo", second.id, "1"], { ok: false });
+  cli(repoRoot, ["changes", "undo", second.id, "0"], { ok: false });
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
   for (const index of ["-1", "1junk", "1.5"]) {
     assert.equal(cli(repoRoot, ["changes", "undo", second.id, index], { ok: false }).ok, false);

@@ -18,7 +18,7 @@ const KIND_VALUES = new Set([
   "status",
 ]);
 
-export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
+const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare": ["application"],
   "interview.prepare-request": ["workspace"],
   "interview.schedule": ["application"],
@@ -308,7 +308,7 @@ function appendWorkspaceMessage(
   return { ok: true, ...result };
 }
 
-export function normalizeWorkspaceIntent(value) {
+function normalizeWorkspaceIntent(value) {
   const type = String(value?.type || "").trim();
   const allowedEntityTypes = WORKSPACE_INTENT_ENTITY_TYPES[type];
   if (!allowedEntityTypes)

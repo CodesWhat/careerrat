@@ -17,7 +17,7 @@ const PROVIDERS = new Set([
   "google_calendar",
   "outlook_calendar",
 ]);
-export const WRITE_PROVIDERS = new Set([
+const WRITE_PROVIDERS = new Set([
   "apple_calendar",
   "google_calendar",
   "outlook_calendar",
@@ -216,7 +216,7 @@ function normalizeCalendarWrite(record, { wroteAt } = {}) {
 // write audit row to top-level calendarWrites[], deduped by provider/event/date/title.
 export function calendarWriteAppend({ repoRoot, env, record } = {}) {
   // The consent gate lives HERE, at the single function that persists a
-  // calendarWrites[] row, so every caller (workspace-agent intent, data
+  // calendarWrites[] row, so every caller (data
   // route, CLI) meets the same bar: "automated" asserts the app's own
   // sanctioned automation wrote the event, which must be backed by a live
   // calendar_sync grant. Manual self-reports are never gated.

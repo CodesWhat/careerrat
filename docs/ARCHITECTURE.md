@@ -26,8 +26,6 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 The root router in `AGENTS.md` maps user intent to 26 user-facing skills;
 `CLAUDE.md` adds Claude-specific reminders without defining a second contract.
-`intake-extract` and `resume-extract` are backend-only helpers invoked by the
-Universal Intake and onboarding upload routes, not user-intent destinations.
 Routes are grouped below by cluster.
 
 ### Onboarding
@@ -247,9 +245,7 @@ handoff.
 
 ### Bounded Skill and Chat Runtime
 
-`POST /api/skill/run` exposes only `intake-extract` and `resume-extract`. Each
-installed run receives one canonical uploaded file plus its isolated skill
-copy. App workflows, browser work, and durable mutations stay behind their
+The one-shot skill runner exposes no skills directly. App workflows, browser work, and durable mutations stay behind their
 typed routes and the workspace agent. The generic chat surface exposes only
 `ingest-profile`, `research-boards`, `research-company`, `research-comp`, and
 `company-health`. Company discovery stays on the app-owned reviewed proposal

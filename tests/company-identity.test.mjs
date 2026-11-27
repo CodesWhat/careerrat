@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { companyMatchesAny, companyMatchKey } from "../src/core/discovery/company-identity.mjs";
-import { buildCompanyProposal } from "../src/core/discovery/company-proposal-gate.mjs";
 
 test("companyMatchKey folds '&' into 'and' and drops trailing legal suffixes", () => {
   assert.equal(companyMatchKey("A & B"), companyMatchKey("A and B"));
@@ -23,16 +22,4 @@ test("companyMatchesAny matches by name or exact domain", () => {
   assert.equal(companyMatchesAny(["A & B Inc"], company), true);
   assert.equal(companyMatchesAny(["https://ab.com/jobs"], company), true);
   assert.equal(companyMatchesAny(["ab.io", "A and C"], company), false);
-});
-
-test("an 'A & B' tracked company marks an 'A and B' proposal as already tracked", () => {
-  const result = buildCompanyProposal({
-    seed: { name: "A and B" },
-    resolution: {},
-    scanResult: { offers: [] },
-    context: { trackedCompanies: ["A & B"] },
-    proposalId: "p1",
-    version: 1,
-  });
-  assert.ok(JSON.stringify(result).includes("tracked"), JSON.stringify(result).slice(0, 300));
 });

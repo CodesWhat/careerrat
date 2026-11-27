@@ -361,7 +361,7 @@ and [data contract](docs/DATA_CONTRACT.md).
 
 </details>
 
-### 28 skills, one workflow
+### 26 skills, one workflow
 
 The terminal workspace and the CLI share the same public skill definitions. You never
 have to know their names; Paul routes to the right one for what you ask.
@@ -370,8 +370,6 @@ have to know their names; Paul routes to the right one for what you ask.
 <summary><strong>Setup and intake</strong></summary>
 
 - `ingest-profile`: conversational candidate setup and resume intake
-- `resume-extract`: structured facts from PDF, image, or DOCX resumes
-- `intake-extract`: verbatim extraction from general dropped files
 - `configure`: inspect and change validated CareerRat settings
 
 </details>

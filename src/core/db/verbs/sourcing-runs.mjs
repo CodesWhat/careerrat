@@ -212,7 +212,7 @@ function failRun(db, current, error, { preserveUpdatedAt = false, summary } = {}
     // caller already had the child's bounded result in hand (e.g. an AI-web
     // search worker that reported conflicts/failedOffers before settling as
     // failed). Restart recovery reconstructs a terminal run's in-memory
-    // outcome as `{ run, value: run.summary }` (workspace-agent.mjs's
+    // outcome as `{ run, value: run.summary }` (the old
     // reconcileOrphanedSourcingRuns), so a null summary meant that detail
     // was unrecoverable across a restart even though it was available at
     // fail time (CR-29 round 10). Callers that don't have one still pass
@@ -246,28 +246,6 @@ export function sourcingRunLatest({ repoRoot, env, purpose = "first-search" } = 
       status: run?.status || SOURCING_RUN_STATUSES.NOT_STARTED,
       run,
     };
-  });
-}
-
-export function sourcingRunRecoverRunning({ repoRoot, env, purpose = "first-search" } = {}) {
-  const normalizedPurpose = assertPurpose(purpose);
-  const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
-    const run = latestRunForPurpose(db, normalizedPurpose);
-    if (run?.status !== SOURCING_RUN_STATUSES.RUNNING) {
-      return { ok: true, recovered: false, run };
-    }
-    const now = nextTimestampIso(run.updated_at);
-    const recovered = updateRun(db, {
-      ...clone(run),
-      updated_at: now,
-      metadata: {
-        ...(run.metadata && typeof run.metadata === "object" ? clone(run.metadata) : {}),
-        recoveredAt: now,
-        recoveryCount: Number(run.metadata?.recoveryCount || 0) + 1,
-      },
-    });
-    return { ok: true, recovered: true, run: recovered };
   });
 }
 

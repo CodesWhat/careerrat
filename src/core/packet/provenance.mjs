@@ -35,14 +35,3 @@ export function packetProvenanceForContext(context = {}) {
     },
   };
 }
-
-export function packetProvenanceMatches(saved, current) {
-  return Boolean(
-    saved &&
-      current &&
-      saved.jd?.path === current.jd.path &&
-      saved.jd?.sha256 === current.jd.sha256 &&
-      saved.evaluation?.evaluatedAt === current.evaluation.evaluatedAt &&
-      saved.evaluation?.sha256 === current.evaluation.sha256
-  );
-}

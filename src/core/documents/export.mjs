@@ -1032,7 +1032,7 @@ export function renderResumeText(markdown) {
  * @returns {Promise<string>} outPath
  * @throws when Playwright Chromium is not available
  */
-export async function renderPdf({ markdown, html, outPath, title = "Document", ats = false }) {
+async function renderPdf({ markdown, html, outPath, title = "Document", ats = false }) {
   // Normalize typographic glyphs on the markdown path so text extraction
   // isn't corrupted by smart quotes / dashes / invisible chars from LLM output.
   // ATS submission copies additionally strip bidi/hidden-text channels;

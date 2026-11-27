@@ -1812,7 +1812,7 @@ export function createApplyDriver({
     // page, so the loop exits after one iteration. See stepSessionFields.
     let stepIndex = 0;
     // Sums fillStep's per-call counts across every page in this run:
-    // AskBar/JobDrawer/workspace-agent render these as run totals, not the
+    // AskBar/JobDrawer render these as run totals, not the
     // final step's count alone.
     let totalFilledCount = 0;
     let totalUploadedCount = 0;

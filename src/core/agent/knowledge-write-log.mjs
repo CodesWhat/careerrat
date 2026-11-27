@@ -25,7 +25,6 @@ import { linkedinProposalUnapprove } from "../db/verbs/linkedin-proposals.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite } from "../profile/evidence-writer.mjs";
 import { restoreRerankRows } from "../strategy/review.mjs";
-import { WORKSPACE_THREAD_ID } from "./workspace-thread.mjs";
 
 const PRIVATE_MARKER = "[private]";
 const PRIVATE_NOTE = "This value is private, so it can't be undone from the thread.";
@@ -214,17 +213,6 @@ export function configWriteEntries({ before, after, writes, source, writer }) {
     );
   }
   return entries;
-}
-
-export function undoNextAction({ messageId, index, entry }) {
-  return {
-    label: entry.label ? `Undo ${entry.label}` : "Undo",
-    intent: {
-      type: "knowledge.revert",
-      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { messageId, index },
-    },
-  };
 }
 
 function entryValue(entry, key) {

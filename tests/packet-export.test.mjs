@@ -20,7 +20,6 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
-import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
@@ -170,26 +169,25 @@ for (const cause of ["abort", "timeout"]) {
   });
 }
 
-test("export intent forwards its operation cancellation signal to packet export", async () => {
+test("packet export forwards its cancellation signal to the document exporter", async () => {
+  const { exportPacketArtifacts } = await importPacketExports();
   const repoRoot = tempRepo();
   seedApp(repoRoot, seedPacketSources(repoRoot));
   const controller = new AbortController();
-  let receivedSignal;
-  await executeWorkspaceIntent({
+  const received = [];
+  await exportPacketArtifacts({
     repoRoot,
     env: tempDownloadsEnv(),
+    appId: "app-export",
+    formats: ["docx"],
     signal: controller.signal,
-    intent: {
-      type: "job.export-documents",
-      entity: { type: "application", id: "app-export" },
-      input: { formats: ["docx"] },
-    },
-    exportDocumentsImpl: async (input) => {
-      receivedSignal = input.signal;
-      return { artifacts: {}, formats: ["docx"] };
+    exportArtifact: async (input) => {
+      received.push(input.signal);
+      return fakeExporter([])(input);
     },
   });
-  assert.equal(receivedSignal, controller.signal);
+  assert.ok(received.length > 0);
+  assert.ok(received.every((signal) => signal === controller.signal));
 });
 
 function workspaceRel(repoRoot, absPath) {
