@@ -32,6 +32,8 @@ CR70 slice 8: the fixtures for vdab, weworkremotely, workingnomads, wttj, yourat
 
 CR70 slice 9: the fixtures for greenhouse and workday were regenerated from upstream's `13786939` suites with the same adaptation. greenhouse keeps the local full-description and `descriptionPartial` cases in place of upstream's 4000-character cap case; workday keeps the case-insensitive cap-advice regex for the re-punctuated warning.
 
+CR70 slice 10: the fixtures for ashby, consider and recruitee were regenerated from upstream's `13786939` suites. ashby drops the `liveness-api.mjs` and `verify-portals.mjs` cases (not vendored) and keeps the local `summaryComponents` and permanent-versus-transient retry cases; consider drops the `_ip-guard` case and keeps the local `createContext` private-address case; recruitee keeps a local `descriptionPartial` case.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location
