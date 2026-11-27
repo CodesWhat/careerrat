@@ -17,6 +17,8 @@ All notable changes to CareerRat are documented here. This project follows
 ### Fixed
 
 - Switching person in the terminal workspace no longer leaves the screen locked when the new person's workspace is too large to show. The switch now ends on its own signal, and a notice says the workspace was skipped.
+- Switching person in the terminal workspace now clears the previous person's jobs and details right away and keeps the screen locked until the switch finishes, so a click on a stale row can no longer act on the new person's workspace.
+- The public-fetch safety check now also refuses the local-use NAT64 range (`64:ff9b:1::/48`) and the other non-public IPv6 ranges: discard-only, documentation, SRv6, deprecated site-local, multicast and the IETF protocol-assignment block.
 
 ## [0.26.0] - 2026-11-27
 
