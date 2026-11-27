@@ -4,11 +4,42 @@
 
 It finds and evaluates roles, prepares applications from your actual experience, and tracks outcomes. Candidate records and artifacts are stored locally. Relevant context goes through the selected AI CLI under its provider's terms. CareerRat itself is free; the AI provider may charge for usage.
 
-## Product documentation
+## Getting started
 
-- [Install and first run](https://careerrat.com/docs/getting-started/install/): requirements, npm installation, and starting the workspace.
-- [The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace/): saved jobs, native agent chat, Inspector tabs, background search, and keyboard controls.
-- [Applying to jobs](https://careerrat.com/docs/guides/applying/): evaluation, application preparation, and submission checks and modes.
-- [Privacy](https://careerrat.com/docs/advanced/privacy/): local storage and external provider boundaries.
-- [CLI reference](https://careerrat.com/docs/reference/cli/): supported commands and flags.
+- [Docs home](https://careerrat.com/docs/): Overview of the documentation.
+- [What is CareerRat?](https://careerrat.com/docs/getting-started/what-is-careerrat/): The problem it solves, how it works, and what an agentic job-search workspace means.
+- [Install and first run](https://careerrat.com/docs/getting-started/install/): Requirements, npm installation, and starting the workspace.
+- [Your first job](https://careerrat.com/docs/getting-started/first-job/): A 5-minute path to confirm the whole loop is working.
+- [The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace/): Saved jobs, native agent chat, Inspector tabs, background search, and keyboard controls.
+- [Keeping current](https://careerrat.com/docs/getting-started/keeping-current/): How to pull the latest code without touching your data.
+
+## Guides
+
+- [Applying to jobs](https://careerrat.com/docs/guides/applying/): Evaluation, application preparation, and submission checks and modes.
+- [Tracking outcomes](https://careerrat.com/docs/guides/tracking-outcomes/): Record results, update pipeline state, and let the system learn from what happens.
+- [Interview prep](https://careerrat.com/docs/guides/interview-prep/): Build packets, capture debriefs, coach live comp calls, and grow your story bank.
+- [LinkedIn optimization](https://careerrat.com/docs/guides/linkedin-optimization/): Read your profile, diff it against your evidence, and propose honest rewrites.
+- [Email and scheduling](https://careerrat.com/docs/guides/email-scheduling/): Draft recruiter threads, schedule calls, and track all communication in one place.
+- [Discovering companies](https://careerrat.com/docs/guides/discovering-companies/): Grow your target-company set when the sweep returns only roles at familiar names.
+- [Running CareerRat for someone else](https://careerrat.com/docs/guides/running-for-someone-else/): Set up a separate workspace for a friend or family member and keep it isolated.
+
+## Advanced
+
+- [Architecture](https://careerrat.com/docs/advanced/architecture/): How CareerRat is layered: skills, scripts, and what lives where.
+- [The agent contract](https://careerrat.com/docs/advanced/agent-contract/): AGENTS.md: intent routing, the gate contract, artifact rules, and write-back invariants.
+- [Supported engines](https://careerrat.com/docs/advanced/engines/): Why CareerRat supports two AI CLIs and the bar the others do not clear.
+- [Data model and the workspace](https://careerrat.com/docs/advanced/data-model/): Where data lives, what each file means, and how the tracker is structured.
+- [Configuration](https://careerrat.com/docs/advanced/configuration/): The .careerrat/candidate/*.yml files, mode switches, and changing settings without re-running onboarding.
+- [Privacy](https://careerrat.com/docs/advanced/privacy/): Local storage and external provider boundaries.
+- [Browser automation](https://careerrat.com/docs/advanced/browser-automation/): Three layers for reaching the web: static fetch, headless scripts, and the agent-driven session browser.
+
+## Reference
+
+- [CLI reference](https://careerrat.com/docs/reference/cli/): Supported commands and flags.
+- [Skills catalog](https://careerrat.com/docs/reference/skills/): All skills and what each one does.
+- [Disclaimer and license](https://careerrat.com/docs/reference/disclaimer/): No warranty, user responsibility, ToS compliance, and the MIT license.
+
+## Source
+
 - [Source repository](https://github.com/CodesWhat/careerrat): source code, license, releases, and issue reporting.
+- [Full documentation as one file](https://careerrat.com/llms-full.txt): every docs page concatenated as Markdown.

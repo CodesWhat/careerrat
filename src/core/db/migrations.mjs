@@ -74,6 +74,16 @@ function assertSequential(migrations) {
   });
 }
 
+function assertNotNewer(version, latest) {
+  if (version > latest && !process.env.CAREERRAT_ALLOW_NEWER_DB) {
+    throw new Error(
+      `this database was written by a newer CareerRat (schema ${version}, this build knows up to ${latest}). ` +
+        "Update CareerRat before opening it, or an older build could damage it. " +
+        "Set CAREERRAT_ALLOW_NEWER_DB=1 to open it anyway."
+    );
+  }
+}
+
 // Apply every migration with id > the db's current user_version, ascending,
 // each in its own BEGIN IMMEDIATE ... COMMIT. Idempotent: re-running against a
 // db already at the latest version applies nothing (pending = []).
@@ -82,19 +92,20 @@ export function runMigrations(db, migrations = ALL_MIGRATIONS) {
 
   const from = readUserVersion(db);
   const latest = migrations.length ? migrations[migrations.length - 1].id : 0;
-  if (from > latest && !process.env.CAREERRAT_ALLOW_NEWER_DB) {
-    throw new Error(
-      `this database was written by a newer CareerRat (schema ${from}, this build knows up to ${latest}). ` +
-        "Update CareerRat before opening it, or an older build could damage it. " +
-        "Set CAREERRAT_ALLOW_NEWER_DB=1 to open it anyway."
-    );
-  }
+  assertNotNewer(from, latest);
   const pending = migrations.filter((migration) => migration.id > from);
   const applied = [];
 
   for (const migration of pending) {
     db.exec("BEGIN IMMEDIATE");
     try {
+      // Another process may have applied this one between our read and the lock.
+      const current = readUserVersion(db);
+      assertNotNewer(current, latest);
+      if (current >= migration.id) {
+        db.exec("ROLLBACK");
+        continue;
+      }
       migration.up(db);
       // user_version is a plain integer under our control (migration.id), not
       // caller-supplied — safe to interpolate; PRAGMA doesn't accept bound params.

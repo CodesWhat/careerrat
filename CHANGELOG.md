@@ -6,6 +6,24 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
+
+### Changed
+
+- The sitemap no longer lists the old dashboard stub, and the stub is marked noindex.
+- CI: every ci-verify and security-actions job now has a timeout, so a job that hangs in a harden-runner or post-step fails in minutes instead of running to the 6-hour default.
+- The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.
+
+### Fixed
+
+- A blocked Adzuna search request no longer prints your app id and key in the error message.
+- The operator roundup's "Status changes" section counts only real status changes, not field edits, evaluations or approvals.
+- Removing a person with `--purge` now refuses while CareerRat has their workspace open, and backs their database up as a consistent copy instead of copying the live WAL files.
+- Restoring a backup stages the copy beside the live database first, so a failed copy leaves the live database untouched.
+- Two processes opening the same workspace can no longer apply the same database migration twice.
+
 ## [0.25.2] - 2026-11-23
 
 ### Changed

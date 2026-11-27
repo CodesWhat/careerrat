@@ -133,7 +133,13 @@ function buildRoundup({ repoRoot, env, base, name, window, operator }) {
     .prepare("SELECT at, data FROM activity_events WHERE type = 'status_change' ORDER BY at ASC")
     .all()
     .map((row) => ({ at: row.at, event: JSON.parse(row.data) }))
-    .filter(({ at, event }) => inWindow(at) && !(event.tags || []).includes("status:applied"))
+    // Field edits, evaluations and approvals share the type but carry no status tag.
+    .filter(
+      ({ at, event }) =>
+        inWindow(at) &&
+        (event.tags || []).some((tag) => String(tag).startsWith("status:")) &&
+        !(event.tags || []).includes("status:applied")
+    )
     .map(({ at, event }) => `${clean(event.title)} (${niceDate(at, tz)})`)
     .filter((line) => !SENSITIVE.test(line));
 

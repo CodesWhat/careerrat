@@ -12,6 +12,7 @@ import { normalizeAutomationConfig } from "../automation/consent.mjs";
 import {
   candidateConfigGet,
   candidateConfigPatch,
+  candidateConfigPatchMany,
   candidateEvidenceMerge,
   candidateEvidenceRemoveOne,
 } from "../db/verbs/candidate.mjs";
@@ -285,8 +286,27 @@ function revertConfig({ repoRoot, env, entry }) {
     else group.patch = mergePatch(group.patch, nestPatch(item.path, prior));
     byName.set(item.name, group);
   }
-  for (const [name, { patch, unset }] of byName) {
-    candidateConfigPatch({ repoRoot, env, name, patch, unset });
+  // Every document's guard and inverse write share one transaction, so a
+  // conflict on any of them rolls all of them back.
+  const writes = [...byName].map(([name, { patch, unset }]) => ({
+    name,
+    patch,
+    unset,
+    // Re-checked inside the write transaction: the read above is not atomic with it.
+    guard: (doc) =>
+      items
+        .filter((item) => item.name === name)
+        .every((item) =>
+          sameValue(readConfigPath(configView(name, doc), item.path), entryValue(item, "after"))
+        ),
+  }));
+  try {
+    candidateConfigPatchMany({ repoRoot, env, writes });
+  } catch (error) {
+    if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
+    throw error;
+  }
+  for (const [name, { unset }] of byName) {
     // A patch that touches location mode fields makes the profile normalizer
     // stamp mode_preferences_confirmed back on, so an absent prior is unset again.
     const now = candidateConfigGet({ repoRoot, env })[name];
