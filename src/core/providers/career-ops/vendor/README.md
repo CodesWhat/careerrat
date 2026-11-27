@@ -32,8 +32,8 @@ verbatim from upstream; only message strings we emit are re-punctuated.
   blocked address, spent timeout). `career-ops-registry.mjs` now keeps the
   `cf-mitigated` response header on a failed request as `cfMitigated`, which is
   what `isCloudflareChallenge` reads. Both local User-Agent exports stay.
-  Not yet ported, because only providers in later slices import them:
-  `resolveDefaultTimeoutMs` (teamtailor) and `fetchTextStream` (workable).
+  `resolveDefaultTimeoutMs` (teamtailor) and `fetchTextStream` (workable) were
+  ported in the CR70 leftovers pass below.
 - Hand-merged, local additions kept: `_html-to-text.mjs` takes upstream's
   tag-start and quadratic-backtracking fixes, `stripHtmlComments`,
   `replaceScriptStyleBlocks`, `visibleText` and `{ cap }` option, and keeps
@@ -81,6 +81,8 @@ CR70 slice 15 (2026-11-27) newly adopted from `13786939`: pracecz, platsbanken, 
 CR70 slice 16 (2026-11-27) newly adopted from `13786939`: adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit. The applicantpro, eploy and zoho-recruit fixtures read their sample pages from `tests/fixtures/career-ops/` (copied from upstream, MIT). Message strings we emit are re-punctuated; comments stay verbatim.
 
 CR70 slice 17 (2026-11-27) newly adopted from `13786939`: gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager. successfactors was re-vendored verbatim here (it was held back in slice 6 because the new upstream file imports successfactors-classic) and its fixture regenerated. The peoplesoft fixture reads its sample pages from `tests/fixtures/career-ops/` and drives the real `createContext()` transport instead of upstream's `makeHttpCtx()`; for that, `fetchResponse` in `career-ops-registry.mjs` now hands a raw 3xx back when a provider asks for `redirect: 'manual'` (guardedFetch already declined to follow it), which peoplesoft's same-origin redirect walk needs. The gupy fixture drops its `config/profile.yml` fallback case, the successfactors, successfactors-classic and taleez fixtures drop their `scan.mjs` cases, and the talentlink fixture is a node:test suite. Message strings we emit are re-punctuated; comments stay verbatim.
+
+CR70 leftovers (2026-11-27) re-vendored verbatim from `13786939`: teamtailor, workable and hackernews, the three held back for a dependency the shim lacked. `_http.mjs` gains `resolveDefaultTimeoutMs` (verbatim) and `fetchTextStream`, a standalone export like upstream's that calls `guardedFetch` instead of fetch: the private-address screen and DNS pinning apply, `redirect` defaults to `error`, `timeoutMs` bounds the whole transfer, and `maxBytes` (default 10 MiB) bounds the decoded body with `response_too_large`. `ats-vendor.mjs` is vendored verbatim at `career-ops/ats-vendor.mjs`, the path hackernews imports it from. The workable fixture drops the `scan.mjs` `buildLocationFilter` and dedup cases and keeps a direct board_slug check; teamtailor and hackernews fixtures are unchanged apart from the vendor path. Message strings we emit are re-punctuated; comments stay verbatim.
 
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
