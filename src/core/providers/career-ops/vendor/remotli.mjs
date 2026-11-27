@@ -107,7 +107,7 @@ function toEpochMs(value) {
 // and the compensating pass is gone.
 function htmlToText(html) {
   if (typeof html !== 'string' || !html) return '';
-  return decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -240,7 +240,7 @@ function assertRemotliUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`remotli: URL must use HTTPS: ${url}`);
   if (!HOST_RE.test(parsed.hostname))
-    throw new Error(`remotli: untrusted hostname "${parsed.hostname}" — must be remotli.ch`);
+    throw new Error(`remotli: untrusted hostname "${parsed.hostname}". Must be remotli.ch`);
   return url;
 }
 
@@ -295,7 +295,7 @@ export default {
 
         if (!data || typeof data !== 'object' || !Array.isArray(/** @type {any} */ (data).jobs)) {
           throw new Error(
-            `remotli: unexpected API response — expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
+            `remotli: unexpected API response: expected { jobs: [...] }, got ${data === null ? 'null' : typeof data}`,
           );
         }
 

@@ -261,7 +261,7 @@ test("Career Ops fetch normalizes provider output for CareerRat and marks missin
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://acme.bamboohr.com/careers/list");
-  assert.equal(calls[0].init.redirect, "error");
+  assert.equal(calls[0].init.redirect, "manual");
   assert.match(calls[0].init.headers["user-agent"], /CareerRat/);
   assert.deepEqual(offers, [
     {

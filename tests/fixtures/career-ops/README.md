@@ -14,6 +14,22 @@ because CareerRat bounds a bare `htmlToText()` by `DESCRIPTION_MAX_BYTES`.
 Skipped, with the helpers they cover not vendored: `_http*`, `_dns-*`,
 `_ip-guard` and the other shared-behavior suites named in the CR70 plan.
 
+CR70 slice 1: the fixtures for a16z-speedrun-talent, agentic-jobs, amazon, arbeitnow, arbeitsagentur, avature were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 2: the fixtures for bamboohr, beesite, breezy, builtin, careerviet, comeet, cryptocurrencyjobs, csod, dassault, deutschebahn, echojobs, eightfold were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 3: the fixtures for feishu-jobs, garena, gem, getro, glints, hecklerkoch, higheredjobs, himalayas, ibm, icims were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 4: the fixtures for itviec, jibeapply, jobbankca, jobicy, jobspresso, jobstreet, jobvite, join were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 5: the fixtures for justjoin, landingjobs, larajobs, lever, manfred, mokahr, mycareersfuture, nodesk, oraclecloud, personio were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 6: the fixtures for phenom, pinpoint, radancy, remoteok, remotive, remotli, rheinmetall, rippling, senjob, softgarden were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 7: the fixtures for tencent, thehub, themuse, tkms, torre were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
+CR70 slice 8: the fixtures for vdab, weworkremotely, workingnomads, wttj, yourator were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location
