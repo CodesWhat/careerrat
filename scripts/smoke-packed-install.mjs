@@ -35,10 +35,10 @@ export function checkInstalledOutput({ version, expectedVersion, help }) {
 }
 
 // execFileSync("npm") fails on Windows (npm.cmd needs a shell), so every npm call
-// goes through npmCommand.
+// goes through npmCommand, which needs this script started via `npm run`.
 function runNpm(args, options) {
-  const { file, args: npmArgs, shell } = npmCommand(args);
-  return execFileSync(file, npmArgs, { ...options, shell });
+  const { file, args: npmArgs } = npmCommand(args);
+  return execFileSync(file, npmArgs, options);
 }
 
 function cleanEnv() {

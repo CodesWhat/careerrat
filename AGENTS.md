@@ -189,9 +189,11 @@ deterministic validation and resolver/scanner/gate checks approve it.
 
 `careerrat companies` is only the tracked-company source-config helper. It lists
 (default), adds (`--add "<name>" --url "<url>"`, dry-run unless `--write`) and
-removes (`--remove "<name>"`) entries, in SQLite for DB workspaces and
-`config/sourced-scan.json` otherwise. It does not create or decide candidate
-lists. Run it only as the confirm-first write step of `discover-companies`.
+removes (`--remove "<name>" --write`) entries, in SQLite for DB workspaces and
+`config/sourced-scan.json` otherwise. `--add` and `--remove` only preview
+without `--write`. It does not create or decide candidate lists. Run it from
+`discover-companies`, which adds validated high-confidence boards right away
+and reviews only ambiguous or unsupported ones.
 
 Errors surface locally with manual input, retry, or no-AI fallback paths rather
 than silently starting chat. Visible agent sessions in the terminal workspace

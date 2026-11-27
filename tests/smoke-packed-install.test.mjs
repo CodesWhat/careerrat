@@ -24,19 +24,17 @@ test("checkInstalledOutput flags a wrong version or a missing usage banner", () 
   assert.equal(checkInstalledOutput({ ...ok, help: "boom" }).length, 1);
 });
 
-test("npmCommand starts npm through a shell on Windows, since npm.cmd cannot be exec'd directly", () => {
-  assert.deepEqual(npmCommand(["pack"], { env: {}, platform: "win32" }), {
-    file: "npm.cmd",
-    args: ["pack"],
-    shell: true,
-  });
+test("npmCommand on Windows without npm_execpath throws instead of guessing an npm", () => {
+  assert.throws(
+    () => npmCommand(["pack"], { env: {}, platform: "win32", execPath: "C:\\node\\node.exe" }),
+    /npm_execpath.*npm run/s
+  );
 });
 
 test("npmCommand runs plain npm without a shell elsewhere", () => {
   assert.deepEqual(npmCommand(["pack"], { env: {}, platform: "linux" }), {
     file: "npm",
     args: ["pack"],
-    shell: false,
   });
 });
 
@@ -49,7 +47,6 @@ test("npmCommand prefers the Node-driven npm CLI when npm_execpath is set", () =
   assert.deepEqual(command, {
     file: "/usr/bin/node",
     args: ["/usr/lib/npm-cli.js", "ci"],
-    shell: false,
   });
 });
 
@@ -59,42 +56,32 @@ test("publish.yml smokes the packed install after the install and before npm pub
     "utf8"
   );
   const installAt = workflow.indexOf("run: corepack npm ci");
-  const smokeAt = workflow.indexOf("node scripts/smoke-packed-install.mjs");
+  const smokeAt = workflow.indexOf("corepack npm run smoke:packed-install");
   const publishAt = workflow.indexOf("corepack npm publish --provenance");
   assert.equal(workflow.includes("app:build"), false, "the web build is retired");
   assert.ok(installAt !== -1 && installAt < smokeAt, "the smoke must run after npm ci");
   assert.ok(smokeAt < publishAt, "the smoke must run before npm publish");
 });
 
-test("npmCommand on Windows without npm_execpath drives npm-cli.js next to node, never cmd.exe", () => {
-  const execPath = "C:\\Program Files\\nodejs\\node.exe";
-  const cli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js";
-  const command = npmCommand(["install", "C:\\Users\\a b\\Temp\\x y.tgz"], {
-    env: {},
-    execPath,
+test("npmCommand prefers npm_execpath over any npm beside node.exe on Windows", () => {
+  const command = npmCommand(["install", "C:\\Users\\a b\\x y.tgz"], {
+    env: { npm_execpath: "C:\\corepack\\npm-cli.js" },
+    execPath: "C:\\Program Files\\nodejs\\node.exe",
     platform: "win32",
-    exists: (p) => p === cli,
   });
   assert.deepEqual(command, {
-    file: execPath,
-    args: [cli, "install", "C:\\Users\\a b\\Temp\\x y.tgz"],
-    shell: false,
+    file: "C:\\Program Files\\nodejs\\node.exe",
+    args: ["C:\\corepack\\npm-cli.js", "install", "C:\\Users\\a b\\x y.tgz"],
   });
 });
 
-test("npmCommand quotes cmd.exe arguments when it must fall back to npm.cmd", () => {
-  const command = npmCommand(["install", "--prefix", "C:\\Users\\a b\\Temp dir", 'say "hi"'], {
-    env: {},
-    execPath: "C:\\node\\node.exe",
-    platform: "win32",
-    exists: () => false,
-  });
-  assert.equal(command.file, "npm.cmd");
-  assert.equal(command.shell, true);
-  assert.deepEqual(command.args, [
-    "install",
-    "--prefix",
-    '"C:\\Users\\a b\\Temp dir"',
-    '"say ""hi"""',
-  ]);
+test("every workflow runs the packed smoke through npm so npm_execpath is set", async () => {
+  for (const name of ["ci-verify.yml", "publish.yml"]) {
+    const workflow = await readFile(
+      new URL(`../.github/workflows/${name}`, import.meta.url),
+      "utf8"
+    );
+    assert.doesNotMatch(workflow, /node scripts\/smoke-packed-install\.mjs/, name);
+    assert.match(workflow, /npm run smoke:packed-install/, name);
+  }
 });
