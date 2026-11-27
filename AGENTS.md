@@ -429,8 +429,7 @@ verbs), then exports — do not repeat these by hand in DB mode:
   `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
 - **Export to legacy files**, immediately after commit: `workspace/tracker.json` +
   `workspace/activity.jsonl` are regenerated for compatibility and recovery.
-  If `careerrat tracker-dev` is running, its `fs.watch` on `tracker.json` picks
-  this up and live-reloads. Run `careerrat tracker` only when a separate recovery
+  Run `careerrat tracker` only when a separate recovery
   snapshot and summary are useful.
 - **`app set-status`** applies the interview round-completion clearing
   automatically (nulls `nextInterviewAt`/`interviewNote`, and `interviewAt` too

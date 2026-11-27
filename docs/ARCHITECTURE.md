@@ -128,13 +128,10 @@ Deterministic code owns the default app path:
 - capture reachable job bodies
 - persist confirmed writes through DB verbs
 
-Company discovery uses the local company proposal APIs by default. The app calls
-`/api/discovery/company-proposals` to create/read proposal batches and
-`/api/discovery/company-proposal-decisions` to approve, reject, suppress,
-escalate, or refresh a proposal. Local proposal errors stay local; they do not
-silently start chat or the full skill runtime.
-Confirmed company writes remain confirm-first source config or DB-owner work,
-not React state, generated tracker files, or model output.
+Company discovery uses the local company proposal path by default. Local
+proposal errors stay local; they do not silently start chat or the full skill
+runtime. Confirmed company writes remain confirm-first source config or DB-owner
+work, not generated tracker files or model output.
 
 ### CareerRat-owned private-account browser workflows
 
@@ -238,10 +235,8 @@ reviewable rather than upload-ready.
 ### Conversational Chat Handoff Layer
 
 Agent-led workflows remain available when the user chooses them. Discovery
-quick-start and next actions call `/api/discovery/quick-start` or
-`/api/discovery/next`, which start or reuse visible `/api/chat/*` sessions.
-`ChatPanel` renders the live session instead of hiding a background runtime
-handoff.
+quick-start and next actions start or reuse visible agent sessions in the
+terminal workspace instead of hiding a background runtime handoff.
 
 ### Bounded Skill and Chat Runtime
 
@@ -290,8 +285,7 @@ Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.
 
 The terminal workspace is the product surface. First-run state, workspace
-operations, and agent-led handoffs all stay inside it. The React product at `/app`
-is the legacy browser surface, reachable only through `careerrat start --browser`.
+operations, and agent-led handoffs all stay inside it.
 
 The runtime persists threads and missions independently of any one AI
 vendor.
@@ -378,8 +372,5 @@ in an actual outer terminal, without model calls.
 Default `careerrat start` opens the Textual workspace with the same agent
 selection as `careerrat tui`. A first run with unfinished candidate setup seeds the
 agent with an `ingest-profile` request (decided from `careerrat doctor`). Without a
-terminal, or without Python 3.11+, it exits non-zero and opens no browser. The
-browser workspace is reachable only through `careerrat start --browser` (and
-`careerrat tracker-dev`), kept so `careerrat update` can restart a running local app
-until the browser product is retired. Packaged Linux checks pass on Debian
+terminal, or without Python 3.11+, it exits non-zero and opens no browser. Packaged Linux checks pass on Debian
 bookworm with `make` and a C++ compiler; Windows has unit coverage only.

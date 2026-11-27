@@ -1,5 +1,9 @@
 # CareerRat full-product acceptance ledger
 
+> **Retired rows:** the browser workspace and desktop app rows in this ledger
+> are retired as of v0.26.0. They are kept as history and are not current
+> acceptance criteria.
+
 Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15

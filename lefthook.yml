@@ -22,7 +22,7 @@ pre-commit:
     - name: structure-guards
       # Fast source checks for the React app foundation, static dashboard
       # retirement, and every shipped YAML config. No build or browser required.
-      run: node --test tests/static-dashboard-retirement.test.mjs tests/config-yaml-parses.test.mjs
+      run: node --test tests/static-dashboard-retirement.test.mjs tests/browser-product-retirement.test.mjs tests/config-yaml-parses.test.mjs
 
 # Piped (not parallel): fail fast in the order listed, cheapest checks first,
 # same order as CI's gate jobs.

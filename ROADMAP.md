@@ -17,9 +17,15 @@ The theme: agnostic to the job. It should work for anyone.
 
 ## Next
 
-- **Finish the TUI transition.** Retire the remaining legacy browser app and
-  desktop distribution code. Preserve employer-site browser automation and the
-  canonical local data, artifacts, job history and Undo.
+The terminal transition is done. The Mac app and the browser workspace are
+retired, and CareerRat ships through npm only.
+
+- **More job sources.** Keep bringing in boards and hiring systems, and keep the
+  existing sources current.
+- **Keep your data safe.** Backups, restores and Undo stay the thing to protect
+  as the code underneath changes.
+- **Employer-site automation.** Preserve the browser automation that fills
+  applications on employer sites.
 
 ## How to read this
 

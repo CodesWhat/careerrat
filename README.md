@@ -42,23 +42,19 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of November 3, 2026:** v0.24.0 is the latest release. CareerRat installs
+**As of November 27, 2026:** v0.26.0 is the next release. CareerRat installs
 from npm and runs on your machine, in your terminal, with the AI CLI you already
 use. v0.19.2 was the last release with a Mac app.
 
-New in v0.24.0:
+New in v0.26.0:
 
-- An Activity tab shows background searches as they run, and Search jobs starts
-  one straight away.
-- Generated résumés, cover letters and AI-drafted packet answers are fact-checked.
-  Review saved and deterministic answers yourself. One-off chat answers aren't
-  automatically checked. Eligible cover-letter and answer drafts may get a wording
-  review when it's enabled in `modes.yml` and available. Deterministic answers are
-  excluded; a failed review leaves the draft unchanged.
-- Honest outcome rates, fake-recruiter warnings, and your corrections saved as
-  writing rules.
-- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
-  may need native build tools.
+- CareerRat is a terminal product now. The Mac app and the browser workspace are
+  retired, and `careerrat start` opens the terminal workspace.
+- About 70 more job boards and hiring systems can be searched, and the sources
+  that were already there are updated.
+- Fixes so your data stays right: removing a person, restoring a backup and
+  undoing a change are safer, and two runs can no longer double-apply a database
+  update.
 
 New in v0.23.0:
 
@@ -220,15 +216,11 @@ There is no mobile app and no Intel Mac build.
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.24.0 highlights</strong></summary>
+<summary><strong>v0.26.0 highlights</strong></summary>
 
-- The terminal workspace has an Activity tab. Search jobs runs in the background
-  and shows its progress there.
-- Saved résumés and cover letters are fact-checked. One-off chat answers are not
-  automatically checked.
-- Honest outcome rates and fake-recruiter warnings.
-- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
-  may need native build tools.
+- CareerRat is a terminal product. The browser workspace is retired.
+- About 70 more job boards and hiring systems can be searched.
+- Removing a person, restoring a backup and undoing a change are safer.
 - CareerRat ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).

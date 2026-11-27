@@ -9,8 +9,8 @@ Use this skill when the user asks to add a tracked event to their real calendar,
 sync Calendar to Apple/Google/Outlook, create a calendar hold from CareerRat, or
 handoff a calendar event to local automation.
 
-This builds on the no-auth Calendar export path already rendered in the
-dashboard. The dashboard is read-only; this skill is the writer, and every real
+This builds on the no-auth Calendar export path already shown in the
+terminal workspace. The workspace view is read-only; this skill is the writer, and every real
 calendar write remains confirm-first.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
