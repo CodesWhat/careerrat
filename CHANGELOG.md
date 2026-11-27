@@ -6,6 +6,14 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- New job source: an employer's own job sitemap. Add an entry with `provider: sitemap` and the sitemap URL, and CareerRat reads the job pages it lists. It checks the site's robots.txt before every sitemap and page it fetches, and skips anything the site disallows or whose robots.txt it can't read.
+
+### Changed
+
+- Career Ops provider snapshot: the roll to upstream `13786939` is finished. Upstream's Wellfound scraper and Telegram channel reader are not adopted: Wellfound's own robots.txt disallows part of what the scraper reads, and Telegram posts can't be tied to an employer reliably. CareerRat's Wellfound search links are unchanged.
+
 ### Fixed
 
 - Switching person in the terminal workspace no longer leaves the screen locked when the new person's workspace is too large to show. The switch now ends on its own signal, and a notice says the workspace was skipped.
