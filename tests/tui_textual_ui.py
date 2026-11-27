@@ -294,6 +294,103 @@ closeAll();
                 self.assertEqual(table.row_count, 0)
                 await pilot.press("ctrl+q")
 
+    async def test_a_person_event_clears_every_filter_control_and_the_snapshot_repopulates_all_four(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-filters-") as folder:
+            base = Path(folder)
+            (base / "workspace").mkdir(parents=True)
+            (base / "workspace/tracker.json").write_text(
+                json.dumps(
+                    {
+                        "applications": [
+                            {"id": "ownerco", "company": "OwnerCo", "role": "Lead", "status": "applied"}
+                        ]
+                    }
+                )
+            )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                status = app.query_one("#status", Select)
+                currency = app.query_one("#currency", Select)
+                basis = app.query_one("#basis", Select)
+                order = app.query_one("#order", Select)
+                # Leave the last person's non-default filters showing.
+                with app.prevent(Select.Changed):
+                    status.set_options([("Active", "active"), ("All statuses", "all"), ("Offer", "offer")])
+                    status.value = "offer"
+                    currency.set_options([("EUR", "EUR"), ("USD", "USD")])
+                    currency.value = "EUR"
+                    basis.value = "annual-earnings"
+                    order.value = "asc"
+                currency.set_class(True, "multi")
+                app.stage_options = {"active": "Active", "all": "All statuses", "offer": "Offer"}
+                await app.handle_event({"type": "person", "person": "ada", "generation": 2})
+                self.assertEqual(status.value, "active")
+                self.assertEqual(currency.value, "USD")
+                self.assertEqual(basis.value, "base")
+                self.assertEqual(order.value, "desc")
+                self.assertEqual(app.stage_options, {})
+                self.assertFalse(currency.has_class("multi"))
+                self.assertFalse(app.query_one("#currency-label").has_class("multi"))
+                # The destination's snapshot repopulates all four.
+                view = {
+                    "jobs": [],
+                    "total": 0,
+                    "mode": "list",
+                    "selectedId": None,
+                    "stages": [{"id": "closed", "label": "Closed"}],
+                    "currency": "GBP",
+                }
+                state = {
+                    "stage": "closed",
+                    "currency": "GBP",
+                    "basis": "annual-earnings",
+                    "order": "asc",
+                }
+                app.update_workspace({"type": "workspace", "view": view, "state": state})
+                self.assertEqual(status.value, "closed")
+                self.assertEqual(currency.value, "GBP")
+                self.assertEqual(basis.value, "annual-earnings")
+                self.assertEqual(order.value, "asc")
+                await pilot.press("ctrl+q")
+
+    async def test_a_switch_unlocks_when_the_request_cannot_be_sent_or_the_bridge_closes(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        app.show_message = lambda *a, **k: None
+        app.show_agent_status = lambda *a, **k: None
+        # No bridge process at all: the request is never delivered.
+        app.proc = None
+        app.switching = True
+        app.awaiting_snapshot = True
+        await app.send({"op": "switch-person", "person": "ada"})
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+
+        class BrokenStdin:
+            def write(self, data):
+                raise BrokenPipeError()
+
+        app.proc = SimpleNamespace(returncode=None, stdin=BrokenStdin())
+        app.switching = True
+        await app.send({"op": "switch-person", "person": None})
+        self.assertFalse(app.switching)
+
+        # The bridge exits while a switch is open.
+        async def wait():
+            return 0
+
+        app.proc = SimpleNamespace(returncode=0, wait=wait)
+        app.stderr_reader = None
+        app.snapshot = {"state": {}}
+        app.switching = True
+        app.awaiting_snapshot = True
+        await app.bridge_closed()
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+
     async def test_switch_complete_unlocks_when_the_snapshot_was_skipped(self):
         app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
         messages = []

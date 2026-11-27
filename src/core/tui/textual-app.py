@@ -1293,15 +1293,21 @@ class CareerRatApp(App):
         if self.switching and message.get("op") not in ("switch-person", "resize", "quit"):
             return
         message = {"generation": self.generation, **message}
+        delivered = False
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.stdin.write((json.dumps(message) + "\n").encode())
                 await self.proc.stdin.drain()
+                delivered = True
             except (BrokenPipeError, ConnectionResetError):
                 if not self.stopping:
                     self.show_message(
                         "Workspace connection closed. Saved data remains available."
                     )
+        if not delivered and message.get("op") == "switch-person":
+            # The bridge will never answer this request, so nothing else ends the lock.
+            self.switching = False
+            self.awaiting_snapshot = False
 
     async def resize_agent(self):
         if self.proc and not self.stopping:
@@ -1408,6 +1414,9 @@ class CareerRatApp(App):
             )
             return
         self.bridge_code = code or 0
+        # A switch the bridge never finished can't finish now.
+        self.switching = False
+        self.awaiting_snapshot = False
         self.write_log(f"bridge exited with code {code}")
         text = "Workspace connection closed. Quit and reopen to reconnect."
         if code:
@@ -1561,10 +1570,36 @@ class CareerRatApp(App):
         self.job_cells = []
         self.query_one("#request", Input).value = ""
         self.clear_rendered_workspace()
+        self.reset_filter_controls()
         self.show_person(person)
         self.write_terminal(f"\x1b]2;CareerRat{' · ' + person if person else ''}\x07")
         self.query_one(NativePane).clear_frame()
         self.call_after_refresh(self.resize_agent)
+
+    def reset_filter_controls(self):
+        """Put the status, currency, pay basis and order controls back to their defaults.
+
+        The destination's snapshot repopulates all four; until it does (or if it is
+        skipped), nothing from the last person's filters stays showing.
+        """
+        self.stage_options = {}
+        status_options = [("Active", "active"), ("All statuses", "all")]
+        currency_options = [("USD", "USD")]
+        with self.prevent(Select.Changed):
+            status = self.query_one("#status", Select)
+            status.set_options(status_options)
+            self.fit_select(status, status_options)
+            status.value = "active"
+            self.size_select(status)
+            currency = self.query_one("#currency", Select)
+            currency.set_options(currency_options)
+            self.fit_select(currency, currency_options)
+            currency.value = "USD"
+            self.size_select(currency)
+            currency.set_class(False, "multi")
+            self.query_one("#currency-label").set_class(False, "multi")
+            self.query_one("#basis", Select).value = "base"
+            self.query_one("#order", Select).value = "desc"
 
     def clear_rendered_workspace(self):
         """Empty the jobs table and inspector, so nothing from the last workspace stays clickable."""
@@ -1726,6 +1761,8 @@ class CareerRatApp(App):
                 multi = len(currencies) > 1
                 currency.set_class(multi, "multi")
                 self.query_one("#currency-label").set_class(multi, "multi")
+                self.query_one("#basis", Select).value = state.get("basis", "base")
+                self.query_one("#order", Select).value = state.get("order", "desc")
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
