@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import { win32 } from "node:path";
-
 function npmInvocation(args, options = {}) {
   const env = options.env || process.env;
   const execPath = options.execPath || process.execPath;
@@ -16,31 +13,19 @@ function npmInvocation(args, options = {}) {
   };
 }
 
-// For scripts that may run without `npm run` (so no npm_execpath). On Windows
-// npm is `npm.cmd`, which execFileSync can only start through a shell; elsewhere
-// plain `npm` is fine. Prefers the Node-driven form whenever npm_execpath exists.
+// For scripts that may run without `npm run` (so no npm_execpath). Always uses
+// the npm that launched the script (npm_execpath), so CI's corepack-pinned npm
+// is the one that runs. On Windows npm is `npm.cmd`, which can only start
+// through a shell, so without npm_execpath we throw rather than guess an npm
+// or quote arguments for cmd.exe. Elsewhere plain `npm` is fine.
 export function npmCommand(args, options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
-  if (env.npm_execpath) {
-    const { file, args: nodeArgs } = npmInvocation(args, options);
-    return { file, args: nodeArgs, shell: false };
-  }
+  if (env.npm_execpath) return npmInvocation(args, options);
   if (platform === "win32") {
-    // Prefer the npm CLI that ships next to node.exe: no cmd.exe, so no quoting.
-    const exists = options.exists || existsSync;
-    const execPath = options.execPath || process.execPath;
-    const cli = win32.join(win32.dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js");
-    if (exists(cli)) return { file: execPath, args: [cli, ...args], shell: false };
-    return { file: "npm.cmd", args: args.map(quoteForCmd), shell: true };
+    throw new Error(
+      "npm_execpath is not set. On Windows run this through npm (for example `npm run smoke:packed-install`) so the selected npm is used."
+    );
   }
-  return { file: "npm", args, shell: false };
-}
-
-// cmd.exe splits unquoted arguments on spaces, so a temp path like
-// "C:\Users\a b\Temp" breaks. Wrap anything with whitespace or cmd
-// metacharacters in double quotes and double any embedded quotes.
-function quoteForCmd(arg) {
-  if (arg !== "" && !/[\s"&|<>^()%!,;=]/.test(arg)) return arg;
-  return `"${arg.replaceAll('"', '""')}"`;
+  return { file: "npm", args };
 }

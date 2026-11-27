@@ -20,6 +20,15 @@ test("AGENTS.md does not claim careerrat companies owns proposal batches", () =>
   const body = section("Runtime Routing for Company Discovery");
   assert.doesNotMatch(body, /proposal batches/i);
   assert.doesNotMatch(body, /company proposal path/i);
-  assert.match(body, /careerrat companies/);
-  assert.match(body, /list|add|remove/i);
+  assert.match(body, /Company discovery runs through the `discover-companies` skill/);
+  assert.match(body, /`careerrat companies` is only the tracked-company source-config helper/);
+  assert.match(body, /does not create or decide candidate\s+lists/);
+});
+
+test("AGENTS.md matches the discover-companies skill and the CLI on writes", () => {
+  const body = section("Runtime Routing for Company Discovery");
+  assert.doesNotMatch(body, /confirm-first/i);
+  assert.match(body, /adds validated high-confidence boards right away/);
+  assert.match(body, /`--remove "<name>" --write`/);
+  assert.match(body, /only preview\s+without `--write`/);
 });

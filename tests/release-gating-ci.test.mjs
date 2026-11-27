@@ -1232,7 +1232,7 @@ test("web-build runs the packed npm install smoke, not the apps/web build", asyn
     workflow.indexOf("  website-build:")
   );
   assert.match(job, /name:\s*web-build/);
-  assert.match(job, /node scripts\/smoke-packed-install\.mjs/);
+  assert.match(job, /npm run smoke:packed-install/);
   assert.match(job, /npm pack --dry-run --json --ignore-scripts > "\$RUNNER_TEMP\/pack\.json"/);
   assert.match(job, /startsWith\("apps\/web"\)/);
   assert.doesNotMatch(job, /--workspace apps\/web\b/);
@@ -1335,7 +1335,7 @@ test("windows-package-smoke runs the win32 filter, then the packed npm smoke, an
   const testStepIndex = job.search(
     /node --test --test-name-pattern "\\\[win32\\\]" tests\/installed-runtime\.test\.mjs tests\/doctor-installed-runtimes\.test\.mjs/
   );
-  const smokeIndex = job.indexOf("node scripts/smoke-packed-install.mjs");
+  const smokeIndex = job.indexOf("npm run smoke:packed-install");
   assert.notEqual(testStepIndex, -1, "the win32 test-name-pattern filter must be present");
   assert.notEqual(smokeIndex, -1, "the packed npm smoke step must be present");
   assert.ok(testStepIndex < smokeIndex, "the win32 filter must run before the packed smoke");

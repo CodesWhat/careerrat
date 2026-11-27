@@ -347,7 +347,7 @@ jobs:
           npm pack --dry-run --json --ignore-scripts > "$RUNNER_TEMP/pack.json"
           node -e 'const fs = require("node:fs"); const [pkg] = Object.values(JSON.parse(fs.readFileSync(process.argv[1], "utf8"))); const hits = pkg.files.map((f) => f.path).filter((p) => p.startsWith("apps/web")); if (hits.length) { console.error("apps/web paths in the npm package:\n" + hits.join("\n")); process.exit(1); }' "$RUNNER_TEMP/pack.json"
       - name: Packed npm install smoke (pack, install --omit=dev, run the bin)
-        run: node scripts/smoke-packed-install.mjs
+        run: npm run smoke:packed-install
 
   # The marketing site plus the Fumadocs docs it embeds. `npm run build
   # --workspace apps/website` chains build-docs-content.mjs, the apps/docs
@@ -634,7 +634,7 @@ jobs:
         run: node --test --test-name-pattern "\[win32\]" tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
       - name: Packed npm install smoke (pack, install --omit=dev, run the bin)
         shell: bash
-        run: node scripts/smoke-packed-install.mjs
+        run: npm run smoke:packed-install
 
   # Exercises the real Chromium application-preparation boundary without any
   # provider call, login, final Submit click, or Applied write. The fixtures
