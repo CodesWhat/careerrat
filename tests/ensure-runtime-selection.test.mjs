@@ -5,8 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { inspectInstalledRuntimeState } from "../src/cli/installed-runtime-route.mjs";
 import { ensureInstalledRuntimeSelection } from "../src/core/ai/ensure-runtime-selection.mjs";
+import { inspectInstalledRuntimeState } from "../src/core/ai/installed-runtime-state.mjs";
 import { loadInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
 const roots = [];

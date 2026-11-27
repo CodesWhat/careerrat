@@ -14,7 +14,7 @@
 // something it derives or contradicts itself.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runBareOneshot } from "../../cli/assist-route.mjs";
+import { runBareOneshot } from "../ai/bare-oneshot.mjs";
 import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
 import { buildClassifyRouteDigest, loadPasteIntakeRoutes } from "./routes.mjs";
 

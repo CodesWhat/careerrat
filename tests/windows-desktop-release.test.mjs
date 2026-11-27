@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { npmInvocation } from "../apps/desktop/scripts/npm-invocation.mjs";
+import { npmInvocation } from "../scripts/lib/npm-invocation.mjs";
 
 async function text(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");

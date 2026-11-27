@@ -16,10 +16,6 @@
 // callAI()'s own job (it writes the usage_event whenever `root` is given),
 // so this route never calls writeByokUsage() itself.
 //
-// runBareOneshot() below still drives the Agent SDK subprocess directly —
-// it's kept exported because src/core/intake/classify.mjs calls it for its
-// own bare one-shot classification; this route no longer uses it.
-//
 // Buffer→parse→validate→retry-once via the same shared
 // src/core/ai/structured-oneshot.mjs helper (through bounded-ai.mjs's
 // native-preferred mode) POST /api/onboard/resume-ai uses — both are small,
@@ -41,8 +37,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
-import { callAI, resolveAIRoute } from "../core/ai/call-ai.mjs";
-import { buildChildEnv, mapSdkMessage, writeByokUsage } from "../core/ai/skill-runtime.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
@@ -101,107 +95,6 @@ export function buildAssistPrompt(kind, input = {}) {
     "keyword already listed.\n\n" +
     SCHEMA_HINT
   );
-}
-
-// ---------------------------------------------------------------------------
-// The bare one-shot driver — no skill, no tools, maxTurns 1. Buffers every
-// `assistant` event's text blocks in order (same convention as
-// onboard-route.mjs's resume-ai invoke callback / skill-runtime.mjs's own
-// "buffer, don't stream" rationale).
-// ---------------------------------------------------------------------------
-
-export async function runBareOneshot({
-  prompt,
-  repoRoot,
-  env,
-  labels,
-  skillLabel,
-  loadSdk,
-  call = callAI,
-}) {
-  const route = resolveAIRoute(env, { repoRoot });
-  if (route.type === "none") {
-    const err = new Error(route.error);
-    err.code = "NO_AI_ROUTE";
-    throw err;
-  }
-
-  const usageLabels = labels || { skill: skillLabel };
-  if (route.type === "installed") {
-    const response = await call({
-      messages: [{ role: "user", content: prompt }],
-      maxTokens: 1024,
-      skill: usageLabels.skill,
-      action: usageLabels.action,
-      operation: usageLabels.operation,
-      root: repoRoot,
-      env,
-    });
-    return (response?.content || [])
-      .filter((block) => block?.type === "text")
-      .map((block) => block.text)
-      .join("");
-  }
-
-  const { query } = await loadSdk();
-  const childEnv = buildChildEnv({
-    route,
-    skill: usageLabels.skill,
-    action: usageLabels.action,
-    operation: usageLabels.operation,
-    baseEnv: env,
-    repoRoot,
-  });
-  const controller = new AbortController();
-
-  const q = query({
-    prompt,
-    options: {
-      cwd: repoRoot,
-      env: childEnv,
-      abortController: controller,
-      tools: [],
-      maxTurns: 1,
-      permissionMode: "default",
-    },
-  });
-
-  let rawText = "";
-  try {
-    for await (const msg of q) {
-      const events = mapSdkMessage(msg, { env });
-      for (const evt of events) {
-        if (evt.type === "assistant") {
-          for (const block of evt.data?.message?.content ?? []) {
-            if (block?.type === "text" && typeof block.text === "string") {
-              rawText += block.text;
-            }
-          }
-        }
-      }
-      if (msg.type === "result") {
-        if (route.type === "byok") {
-          writeByokUsage({
-            msg,
-            skill: usageLabels.skill,
-            action: usageLabels.action,
-            operation: usageLabels.operation,
-            repoRoot,
-            env,
-          });
-        }
-        break;
-      }
-    }
-  } finally {
-    try {
-      await q.return?.();
-    } catch {
-      // best-effort cleanup only
-    }
-  }
-
-  return rawText;
 }
 
 // ---------------------------------------------------------------------------
