@@ -216,3 +216,6 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
   `fetchJson`, `fetchText` and `fetchResponse` read the decoded body with a
   byte count, cancel it at the limit and throw `response_too_large`. The limit
   is the request's `maxBytes`, or 10 MiB when a provider sets none.
+- `workday.mjs`: `stripRepostSuffixKeepCase` strips a one-digit `-N` suffix only
+  (upstream allows two). `JR2024-12` and `JR2024-13` are different requisitions
+  and must keep distinct identities.
