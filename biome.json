@@ -12,6 +12,7 @@
       "!src/core/providers/career-ops/vendor",
       "!tests/fixtures/career-ops",
       "tests/**",
+      "!tests/fixtures/career-ops/**/*.html",
       "scripts/**",
       "bin/**",
       "apps/website/src/**",
