@@ -11,6 +11,11 @@ All notable changes to CareerRat are documented here. This project follows
 - Switching person in the terminal workspace no longer leaves the screen locked when the new person's workspace is too large to show. The switch now ends on its own signal, and a notice says the workspace was skipped.
 - Switching person in the terminal workspace now clears the previous person's jobs and details right away and keeps the screen locked until the switch finishes, so a click on a stale row can no longer act on the new person's workspace.
 - The public-fetch safety check now also refuses the local-use NAT64 range (`64:ff9b:1::/48`) and the other non-public IPv6 ranges: discard-only, documentation, SRv6, deprecated site-local, multicast and the IETF protocol-assignment block.
+- The public-fetch safety check now treats IPv6 as an allowlist: only global unicast (`2000::/3`) minus the non-reachable special-purpose ranges is fetchable, with the registry's reachable exceptions (such as `2001:3::/32`) allowed. IPv4-compatible `::a.b.c.d` addresses are refused.
+- The public-fetch safety check now matches the IPv4 special-purpose registry: `192.0.0.9` and `192.0.0.10` are allowed and the deprecated 6to4 relay range `192.88.99.0/24` is refused, including when wrapped in IPv6.
+- `localhost.` and `*.localhost.` with a trailing dot are now refused as local hosts by the public-fetch check and the WebFetch gate.
+- A failure while the terminal workspace closes the previous person's session no longer leaves the screen locked. Every switch now ends on one signal, with an error notice if cleanup failed, and the screen also unlocks if the request can't be sent or the connection closes mid-switch.
+- Switching person in the terminal workspace now resets the status, currency, pay basis and sort controls, then fills all four from the new person's workspace, so the previous person's filters no longer linger.
 
 ## [0.26.0] - 2026-11-27
 

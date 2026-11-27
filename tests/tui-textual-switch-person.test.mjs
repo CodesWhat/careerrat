@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { holdersDir } from "../src/core/db/holders.mjs";
 import { createTextualSession } from "../src/core/tui/textual-session.mjs";
 
 const root = join(import.meta.dirname, "..");
@@ -349,4 +350,36 @@ test("a destination that fails while the workspace state is built is refused and
     false
   );
   assert.deepEqual(ids(events), ["owner-job"]);
+});
+
+test("a holder removal that throws during teardown still ends the switch once, with an error", async (t) => {
+  const { base, events, session } = await fixture(t);
+  const env = { ...process.env, CAREERRAT_HOME: base };
+  for (const key of ["CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"]) delete env[key];
+  // rmSync of a non-empty directory throws, standing in for a holder file that
+  // can't be removed.
+  const dir = holdersDir({ repoRoot: root, env });
+  const [holder] = readdirSync(dir);
+  rmSync(join(dir, holder), { force: true });
+  mkdirSync(join(dir, holder));
+  writeFileSync(join(dir, holder, "stuck"), "x");
+  const before = events.length;
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  const after = events.slice(before);
+  const terminal = after.filter((e) => e.type === "switch-complete" || e.type === "switch-end");
+  assert.equal(terminal.length, 1, "exactly one terminal event");
+  assert.equal(terminal[0].type, "switch-complete");
+  assert.equal(after.at(-1).type, "switch-complete", "nothing follows the terminal event");
+  assert.ok(after.some((e) => e.type === "error"));
+  assert.deepEqual(ids(events), ["ada-job"], "the destination is open");
+  // The session still works afterwards.
+  await session.dispatch({ op: "switch-person", person: "bo" });
+  assert.deepEqual(ids(events), ["bo-job"]);
+  rmSync(join(dir, holder), { recursive: true, force: true });
+});
+
+test("a refused person value ends the switch before the request is rejected", async (t) => {
+  const { events, session } = await fixture(t);
+  await assert.rejects(session.dispatch({ op: "switch-person", person: 7 }), /Person must be/);
+  assert.equal(events.at(-1).type, "switch-end");
 });
