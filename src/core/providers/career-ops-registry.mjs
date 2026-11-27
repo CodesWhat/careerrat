@@ -230,18 +230,30 @@ function bodyLimitFor(value) {
 }
 
 // Read the decoded body while counting bytes, and cancel it the moment it
-// passes the limit, so an oversize response is never held whole.
-async function readBodyText(response, maxBytes) {
+// passes the limit, so an oversize response is never held whole. With
+// `truncate`, the first maxBytes are kept and the rest is cancelled instead of
+// failing (error bodies: diagnostic text under the cap must survive).
+async function readBodyText(response, maxBytes, { truncate = false } = {}) {
+  // Content-Length is the wire size: it only bounds the decoded body when the
+  // response is not content-encoded, so a compressed response is judged on the
+  // decoded stream below.
+  const encoding = (response.headers?.get?.("content-encoding") || "").trim().toLowerCase();
   const declared = Number(response.headers?.get?.("content-length"));
   const reader = response.body?.getReader?.();
-  if (Number.isFinite(declared) && declared > maxBytes) {
+  if (
+    !truncate &&
+    (encoding === "" || encoding === "identity") &&
+    Number.isFinite(declared) &&
+    declared > maxBytes
+  ) {
     await reader?.cancel().catch(() => {});
     throw responseTooLarge(maxBytes, declared);
   }
   if (!reader) {
     const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > maxBytes) throw responseTooLarge(maxBytes);
-    return text;
+    if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+    if (!truncate) throw responseTooLarge(maxBytes);
+    return Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
   }
   const decoder = new TextDecoder("utf-8");
   let bytes = 0;
@@ -251,7 +263,11 @@ async function readBodyText(response, maxBytes) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.length;
-      if (bytes > maxBytes) throw responseTooLarge(maxBytes);
+      if (bytes > maxBytes) {
+        if (!truncate) throw responseTooLarge(maxBytes);
+        text += decoder.decode(value.subarray(0, value.length - (bytes - maxBytes)));
+        return text;
+      }
       text += decoder.decode(value, { stream: true });
     }
     return text + decoder.decode();
@@ -352,7 +368,9 @@ async function request(
     const manualRedirect =
       options.redirect === "manual" && response.status >= 300 && response.status < 400;
     if (!response.ok && !(manualRedirect && options.returnManualRedirect === true)) {
-      const responseText = await readBodyText(response, ERROR_BODY_MAX_BYTES).catch(() => "");
+      const responseText = await readBodyText(response, ERROR_BODY_MAX_BYTES, {
+        truncate: true,
+      }).catch(() => "");
       const error = new Error(
         `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
       );
