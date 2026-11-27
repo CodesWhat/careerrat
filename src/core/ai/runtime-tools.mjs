@@ -104,7 +104,7 @@ export function installedSkillRuntimePosture({ skill } = {}) {
   return "Do not claim any write or side effect; this run can only return its bounded model result.";
 }
 
-export const RUNTIME_TOOL_PROFILES = Object.freeze({
+const RUNTIME_TOOL_PROFILES = Object.freeze({
   "app-safe": APP_SAFE_RUNTIME_TOOLS,
   chat: CHAT_RUNTIME_TOOLS,
 });

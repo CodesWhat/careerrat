@@ -88,7 +88,7 @@ function onboardingPromptsAreNearDuplicates(left, right) {
   return sharedCount / Math.max(leftTerms.size, rightTerms.size) >= 0.6;
 }
 
-export function onboardingMessageIsInternal(message) {
+function onboardingMessageIsInternal(message) {
   return (
     message?.visibility === "internal" ||
     /^\s*\[system\](?:\s|$)/i.test(String(message?.text || ""))
@@ -141,16 +141,6 @@ function onboardingAssistantWaitsForUser(message) {
     message?.role === "assistant" &&
     (onboardingAssistantPromptsUser(message) || onboardingAssistantHasUnresolvedAction(message))
   );
-}
-
-export function onboardingHasUnansweredTurn(messages) {
-  for (let index = list(messages).length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (onboardingMessageIsInternal(message)) continue;
-    if (onboardingMessageAnswersPrompt(message)) return false;
-    if (message?.role === "assistant") return onboardingAssistantWaitsForUser(message);
-  }
-  return false;
 }
 
 export function collapseUnansweredOnboardingPrompts(messages) {

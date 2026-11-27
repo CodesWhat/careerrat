@@ -1,6 +1,6 @@
 // tests/db-scan-context.test.mjs
 // Focused coverage for the DB scanner context helper. This intentionally stays
-// below scripts/scan-sourced.mjs and src/cli/search-route.mjs so the helper
+// below scripts/scan-sourced.mjs and the retired search route so the helper
 // contract is proven without route or scanner orchestration side effects.
 
 import assert from "node:assert/strict";

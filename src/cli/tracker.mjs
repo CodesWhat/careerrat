@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CareerRat tracker CLI — snapshot tracker.json, summarize, check follow-ups, verify.
 //
-// The live product is the React SPA at /app (src/cli/tracker-dev.mjs), which
+// The live product is the React SPA at /app (the retired tracker-dev server), which
 // reads the sqlite-backed GET /api/data/dashboard view model directly. This CLI
 // snapshots and summarizes tracker.json because skills use `careerrat tracker`
 // as their durable-backup checkpoint.

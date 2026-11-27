@@ -1,7 +1,7 @@
 // dispatch.mjs — the three-lane dispatch table (M9 orchestrator decisions
 // memo, "Lanes"). Pure data-in/data-out: given a classification, decide
 // {lane, action, params} — no verb calls, no skill runs, no chat/session
-// I/O. The route layer (src/cli/intake-route.mjs) performs the actual
+// I/O. The route layer (the retired intake route) performs the actual
 // dispatch based on this decision, after (and only after) POST
 // /api/intake/confirm — this module never runs before confirm.
 //

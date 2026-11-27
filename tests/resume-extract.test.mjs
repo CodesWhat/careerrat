@@ -1,7 +1,7 @@
 // tests/resume-extract.test.mjs
 // node:test suite for the M8 resume-extract skill (.agents/skills/resume-
 // extract/SKILL.md) — the backend of POST /api/onboard/resume-ai
-// (src/cli/onboard-route.mjs), which is already covered end-to-end against a
+// (the retired onboard route), which is already covered end-to-end against a
 // MOCKED runtime in tests/onboard-route.test.mjs. This file covers the one
 // thing that can't be mocked: whether the REAL SKILL.md, read by a REAL
 // model over the REAL embedded runtime (src/core/ai/skill-runtime.mjs's

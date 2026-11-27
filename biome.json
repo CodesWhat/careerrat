@@ -14,7 +14,6 @@
       "tests/**",
       "scripts/**",
       "bin/**",
-      "apps/web/src/**",
       "apps/website/src/**",
       "plugins/**",
       "*.json",

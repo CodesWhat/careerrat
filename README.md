@@ -332,7 +332,7 @@ the interruption. Use Search jobs to retry with another search.
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,
 interview dossiers, resumes, and exports remain readable Markdown, PDF, or other
-normal files. See the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
+normal files.
 
 ### Your data stays on your machine
 

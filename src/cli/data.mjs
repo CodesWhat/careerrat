@@ -3,7 +3,7 @@
 // careerrat data — the sqlite-backed data layer's CLI surface (M6).
 //
 // `careerrat data <verb>` is a thin argv shim over the exact same lib functions
-// the HTTP route (src/cli/data-route.mjs) calls — decision 6's "one shared
+// the HTTP route (the retired data route) calls — decision 6's "one shared
 // write path": there is exactly one INSERT/UPDATE call site per domain action,
 // this file just parses argv into the same options object the route builds
 // from a parsed JSON body.
@@ -998,7 +998,7 @@ function cmdDeepIngestProposal(rest) {
 
 // ---------------------------------------------------------------------------
 // intake <sub> — M9 Universal Intake's queue-state verbs. Mirrors the exact
-// same lib functions src/cli/intake-route.mjs calls (one-write-path); unlike
+// same lib functions the retired intake route calls (one-write-path); unlike
 // every verb above, these do NOT bump meta.version/last_updated_at and do NOT
 // re-export tracker.json/activity.jsonl afterward — see
 // src/core/db/verbs/intake.mjs's own header comment for why intake_items

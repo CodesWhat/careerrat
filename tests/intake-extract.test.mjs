@@ -1,7 +1,7 @@
 // tests/intake-extract.test.mjs
 // node:test suite for the intake-extract skill (.agents/skills/intake-extract/
 // SKILL.md) — the backend of POST /api/intake/upload's PDF/image branch
-// (src/cli/intake-route.mjs), which is already covered end-to-end against a
+// (the retired intake route), which is already covered end-to-end against a
 // MOCKED runtime in tests/intake-route.test.mjs. This file mirrors
 // tests/resume-extract.test.mjs's structure: a plain deterministic schema
 // check (always runs, no network) plus a live-model-gated INTEGRATION test

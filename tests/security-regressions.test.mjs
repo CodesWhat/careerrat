@@ -7,7 +7,6 @@ import { plainTextFromHtml } from "../src/core/deep-ingest/source-normalize.mjs"
 import { extractPublicCareersPage } from "../src/core/discovery/public-page-extractor.mjs";
 import { extractDocxResumeMarkdown } from "../src/core/onboarding/resume-docx.mjs";
 import { trimEdgeCharacter } from "../src/core/text/slug.mjs";
-import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 async function smallDocx() {
   const zip = new JSZip();
@@ -58,26 +57,6 @@ test("DOCX HTML fallback decodes entities once and omits active-content bodies",
     mammoth.convertToMarkdown = convertToMarkdown;
     mammoth.convertToHtml = convertToHtml;
   }
-});
-
-test("HTTP route dispatch invokes only callable handlers through a fixed method", () => {
-  let calls = 0;
-  const req = { method: "GET" };
-  const res = {};
-
-  assert.equal(
-    dispatchHttpRoute(
-      () => {
-        calls += 1;
-      },
-      req,
-      res
-    ),
-    true
-  );
-  assert.equal(dispatchHttpRoute(null, req, res), false);
-  assert.equal(dispatchHttpRoute({ handle: "not callable" }, req, res), false);
-  assert.equal(calls, 1);
 });
 
 test("slug normalization avoids the ambiguous repeated-edge alternation", () => {

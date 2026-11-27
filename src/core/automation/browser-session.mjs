@@ -130,14 +130,6 @@ function createOrcaBrowserSession({ repoRoot, env = process.env, runOrcaImpl } =
   return wrapOps(createOrcaOps({ runOrcaImpl: run }), "orca");
 }
 
-export function searchSourceBrowserSessionOptions(source = {}) {
-  return {
-    platform: source.platform || source.provider || "search",
-    provider: "playwright",
-    headless: source.auth !== true,
-  };
-}
-
 export function createConfiguredBrowserSession({
   repoRoot,
   env = process.env,

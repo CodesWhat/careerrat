@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-export const VERIFIED_RUNTIME_CAPABILITIES = Object.freeze({
+const VERIFIED_RUNTIME_CAPABILITIES = Object.freeze({
   completion: true,
   structuredOutput: true,
   appWorkflows: true,
@@ -42,36 +42,5 @@ export function createVerifiedRuntimeExecutable({ root, runtimeId, version = "0.
       capabilitiesVerified: true,
       ...evidence,
     },
-  };
-}
-
-export function verifiedInstalledExecutionPlan(
-  operation,
-  {
-    runtimeId = "codex",
-    path = `/fixture/${runtimeId}`,
-    requested = { quality: "automatic", reasoning: "automatic" },
-    resolved = {},
-  } = {}
-) {
-  const quality = operation === "structured.extraction" ? "balanced" : "best";
-  const reasoning = operation === "coach.deep" ? "high" : "medium";
-  return {
-    policyVersion: 1,
-    operation,
-    runtimeId,
-    adapterVersion: 1,
-    requested,
-    resolved: {
-      quality,
-      reasoning,
-      model: runtimeId === "claude" ? "opus" : "gpt-5.6-sol",
-      modelSource: "alias",
-      effort: reasoning,
-      speedTier: null,
-      ...resolved,
-    },
-    installedRuntime: verifiedRuntimeEvidence(path),
-    fallback: null,
   };
 }

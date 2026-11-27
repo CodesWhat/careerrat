@@ -25,7 +25,6 @@
         "tests/fixtures/db-concurrency-worker.mjs"
       ]
     },
-    "apps/web": {},
     "apps/docs": {
       "ignoreDependencies": [
         "@fontsource/archivo",

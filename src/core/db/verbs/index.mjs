@@ -1,6 +1,6 @@
 // verbs/index.mjs — the single import surface for every domain-action verb
 // (M6 deliverable "verbs.mjs (or split per entity)" — split by entity below,
-// re-exported here so src/cli/data.mjs and src/cli/data-route.mjs each have
+// re-exported here so src/cli/data.mjs and the retired data route each have
 // exactly one place to import from).
 
 export { activityAppend } from "./activity.mjs";

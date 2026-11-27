@@ -464,7 +464,7 @@ function compactCoverageOffers(payload) {
   return offers;
 }
 
-export function compactDeterministicCoverage(deterministic) {
+function compactDeterministicCoverage(deterministic) {
   if (!deterministic || typeof deterministic !== "object" || Array.isArray(deterministic)) {
     return null;
   }

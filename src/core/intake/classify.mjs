@@ -8,7 +8,7 @@
 // needs a model call to know it's a job posting.
 //
 // trackerMatch is NEVER computed here and never left for the model to
-// compute — the caller (src/cli/intake-route.mjs) passes in whatever
+// compute — the caller (the retired intake route) passes in whatever
 // src/core/intake/match.mjs has already deterministically resolved, purely
 // as prompt CONTEXT the model may reference in proposedAction, never as
 // something it derives or contradicts itself.

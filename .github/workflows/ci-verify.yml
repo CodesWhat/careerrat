@@ -79,7 +79,7 @@ jobs:
         with:
           node-version: "^24.22.1"
       - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
-        run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs tests/check-lockfile.test.mjs
+        run: node --test tests/static-dashboard-retirement.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs tests/check-lockfile.test.mjs
 
   # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
   # not just the structure-guards subset. A handful of integration tests self-skip
@@ -201,8 +201,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/careerrat-textual"
           "$RUNNER_TEMP/careerrat-textual/bin/python" -m pip install --require-hashes --only-binary=:all: -r src/core/tui/requirements.txt
           "$RUNNER_TEMP/careerrat-textual/bin/python" tests/tui_textual_ui.py
-      - name: Web UI test suite
-        run: npm --workspace apps/web test
 
   # Decides which path-sensitive jobs a dev PR needs. Plain git diff against the
   # PR base, no third-party action. Any error (or any non-PR event) reports
@@ -355,7 +353,7 @@ jobs:
   # --workspace apps/website` chains build-docs-content.mjs, the apps/docs
   # Next build, and then the website build, so this one job covers all three.
   #
-  # It exists because nothing else did. web-build above builds apps/web only,
+  # It exists because nothing else did. web-build above runs the packed npm install smoke only,
   # so on 2026-08-20 a TypeScript 6 bump made `baseUrl` a hard error and broke
   # the docs build on main with every in-repo check still green. The only
   # signal was the Vercel context, which fails on deploy quota so routinely
