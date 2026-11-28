@@ -59,7 +59,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
         with:
           egress-policy: block
           # This job only calls `gh api repos/.../releases`, the same
@@ -127,7 +127,7 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
         with:
           egress-policy: block
           # Observed from the v0.12.0 run (StepSecurity insights, run
@@ -158,7 +158,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Generate the SPDX SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
           path: .
           format: spdx-json
